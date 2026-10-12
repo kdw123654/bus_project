@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>7790 실시간 노선도 & 스마트 통학 길찾기</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pin-float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-3px); }
+    }
+    .live-bus-pin { animation: pin-float 2s ease-in-out infinite; }
+  </style>
+</head>
+<body class="bg-gray-100 flex justify-center min-h-screen font-sans text-gray-900 antialiased">
+
+  <div class="w-full max-w-md bg-white min-h-screen flex flex-col shadow-2xl relative">
+    
+    <!-- 최상단 네비게이션 탭 -->
+    <div class="grid grid-cols-2 bg-gray-100 p-1.5 border-b border-gray-200 sticky top-0 z-40">
+      <button id="tabRouteBtn" onclick="switchTab('route')" class="py-2 text-xs font-black rounded-lg transition bg-white text-blue-600 shadow-sm flex items-center justify-center space-x-1">
+        <span>🚌</span> <span>7790 노선도</span>
+      </button>
+      <button id="tabNavBtn" onclick="switchTab('nav')" class="py-2 text-xs font-black rounded-lg transition text-gray-500 hover:text-gray-900 flex items-center justify-center space-x-1">
+        <span>🗺️</span> <span>스마트 길찾기</span>
+      </button>
+    </div>
+
+    <!-- ================= [뷰 1: 7790 노선도] ================= -->
+    <div id="routeView" class="flex-1 flex flex-col">
+      <header class="px-4 py-3 border-b border-gray-100 bg-white flex justify-between items-center">
+        <div class="flex items-center space-x-2">
+          <span class="bg-red-500 text-white text-[11px] font-black px-2 py-0.5 rounded shadow-sm">직행</span>
+          <h1 class="text-2xl font-black text-gray-900 tracking-tight">7790</h1>
+          <span class="text-xs text-gray-400 font-medium">사당역행</span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button id="testModeBtn" onclick="toggleTestMode()" class="text-[11px] font-bold px-2.5 py-1.5 rounded-full border border-amber-300 bg-amber-50 text-amber-700">
+            🧪 전세 테스트
+          </button>
+          <button onclick="scrollToSadang()" class="text-[11px] bg-blue-50 text-blue-600 font-bold px-2 py-1.5 rounded-full border border-blue-200">
+            📍 사당역
+          </button>
+          <button onclick="fetchBusData()" id="refreshBtn" class="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600">
+            🔄
+          </button>
+        </div>
+      </header>
+
+      <div id="testBanner" class="hidden bg-amber-500 text-white text-xs px-4 py-2 font-bold flex justify-between items-center shadow-inner">
+        <span>⚠️ [가상 테스트] 출근 전세버스가 투입된 상황입니다</span>
+        <button onclick="toggleTestMode()" class="underline text-[11px]">종료</button>
+      </div>
+
+      <section class="p-4 bg-gray-50/80 border-b border-gray-200">
+        <div class="flex justify-between items-center mb-2.5">
+          <div class="flex items-center space-x-1.5">
+            <span class="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span>
+            <h2 class="text-sm font-bold text-gray-800">사당역9번출구앞 실시간 도착</h2>
+          </div>
+          <span class="text-[11px] text-gray-400" id="updateTime">15초 자동 갱신</span>
+        </div>
+        <div id="arrivalCards" class="space-y-2">
+          <div class="text-xs text-gray-400 text-center py-2 animate-pulse">도착 정보 조회 중...</div>
+        </div>
+      </section>
+
+      <main class="flex-1 px-5 py-6 overflow-y-auto" id="timelineScrollArea">
+        <div class="relative pl-7" id="routeTimeline"></div>
+      </main>
+    </div>
+
+    <!-- ================= [뷰 2: 완전 자연어 대중교통 길찾기] ================= -->
+    <div id="navView" class="hidden flex-1 flex flex-col p-4 space-y-4 overflow-y-auto">
+      
+      <!-- 경로 검색 카드 -->
+      <div class="bg-gray-50 p-4 rounded-2xl border border-gray-200 space-y-3">
+        <div class="flex justify-between items-center">
+          <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider">대중교통 최적 경로 탐색</h2>
+          <span class="text-[10px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full font-bold">100% 실시간 자연어</span>
+        </div>
+
+        <!-- 출발지 입력 -->
+        <div>
+          <div class="flex justify-between items-center mb-1">
+            <label class="text-xs font-bold text-blue-600">출발지 (자연어로 입력)</label>
+            <button onclick="getUserLocation()" class="text-[11px] text-blue-500 font-bold hover:underline flex items-center">
+              <span>내 GPS 위치로 채우기</span>
+            </button>
+          </div>
+          <div class="relative">
+            <input type="text" id="startInput" value="사당역" placeholder="출발지 (예: 사당역, 강남역, 화성시청)" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium focus:outline-blue-500 pr-12" oninput="debounceSearch('start')" onkeydown="if(event.key==='Enter') searchTransitRoute()">
+            <button onclick="searchPlaceManual('start')" class="absolute right-1.5 top-1.5 px-2.5 py-1 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold">찾기</button>
+          </div>
+          <div id="startSearchResults" class="hidden mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-1.5 space-y-1 text-xs z-30"></div>
+        </div>
+
+        <!-- 목적지 입력 -->
+        <div>
+          <label class="text-xs font-bold text-red-600 block mb-1">목적지 (자연어로 입력)</label>
+          <div class="relative">
+            <input type="text" id="endInput" value="수원대학교" placeholder="목적지 (예: 수원대학교, 홍대입구, 에버랜드)" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium focus:outline-blue-500 pr-12" oninput="debounceSearch('end')" onkeydown="if(event.key==='Enter') searchTransitRoute()">
+            <button onclick="searchPlaceManual('end')" class="absolute right-1.5 top-1.5 px-2.5 py-1 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold">찾기</button>
+          </div>
+          <div id="endSearchResults" class="hidden mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-1.5 space-y-1 text-xs z-30"></div>
+        </div>
+
+        <!-- 경로 검색 버튼 -->
+        <button onclick="searchTransitRoute()" id="searchRouteBtn" class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 active:scale-98 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center justify-center space-x-1.5 mt-2">
+          <span>🔍</span> <span>최적 경로 검색하기</span>
+        </button>
+      </div>
+
+      <!-- 길찾기 결과 목록 -->
+      <div id="routeResults" class="space-y-3">
+        <div class="text-center py-8 text-gray-400 text-xs">
+          원하는 출발지와 목적지를 입력 후 [최적 경로 검색하기]를 눌러주세요.
+        </div>
+      </div>
+    </div>
+
+    <footer class="py-2.5 bg-gray-50 border-t border-gray-200 text-center text-[11px] text-gray-400">
+      수원대학교 통학 도우미 · 실시간 노선 & 실시간 자연어 길찾기
+    </footer>
+  </div>
+
+  <script>
+    let isTestMode = false;
+    let selectedStart = null;
+    let selectedEnd = null;
+    let searchTimer = null;
+
+    function switchTab(tab) {
+      const routeView = document.getElementById("routeView");
+      const navView = document.getElementById("navView");
+      const tabRouteBtn = document.getElementById("tabRouteBtn");
+      const tabNavBtn = document.getElementById("tabNavBtn");
+
+      if (tab === 'route') {
+        routeView.classList.remove("hidden");
+        navView.classList.add("hidden");
+        tabRouteBtn.classList.add("bg-white", "text-blue-600", "shadow-sm");
+        tabRouteBtn.classList.remove("text-gray-500");
+        tabNavBtn.classList.remove("bg-white", "text-blue-600", "shadow-sm");
+        tabNavBtn.classList.add("text-gray-500");
+      } else {
+        routeView.classList.add("hidden");
+        navView.classList.remove("hidden");
+        tabNavBtn.classList.add("bg-white", "text-blue-600", "shadow-sm");
+        tabNavBtn.classList.remove("text-gray-500");
+        tabRouteBtn.classList.remove("bg-white", "text-blue-600", "shadow-sm");
+        tabRouteBtn.classList.add("text-gray-500");
+      }
+    }
+
+    // 자연어 입력 시 자동완성 디바운스
+    function debounceSearch(type) {
+      clearTimeout(searchTimer);
+      if (type === 'start') selectedStart = null;
+      if (type === 'end') selectedEnd = null;
+
+      searchTimer = setTimeout(() => {
+        searchPlaceManual(type);
+      }, 350);
+    }
+
+    // 자연어 장소 검색
+    async function searchPlaceManual(type) {
+      const input = document.getElementById(type === 'start' ? 'startInput' : 'endInput');
+      const resultsDiv = document.getElementById(type === 'start' ? 'startSearchResults' : 'endSearchResults');
+      const kw = input.value.trim();
+
+      if (!kw || kw.startsWith("📍 현재 위치")) {
+        resultsDiv.classList.add("hidden");
+        return;
+      }
+
+      resultsDiv.classList.remove("hidden");
+      resultsDiv.innerHTML = `<div class="p-2 text-gray-400 animate-pulse">실시간 장소 탐색 중...</div>`;
+
+      try {
+        const res = await fetch(`/api/search-place?keyword=${encodeURIComponent(kw)}`);
+        const data = await res.json();
+
+        if (!data.success || data.places.length === 0) {
+          resultsDiv.innerHTML = `<div class="p-2 text-gray-400">일치하는 장소를 찾을 수 없습니다.</div>`;
+          return;
+        }
+
+        resultsDiv.innerHTML = data.places.map(p => `
+          <div onclick="selectPlace('${type}', '${p.name}', ${p.x}, ${p.y})" class="p-2 hover:bg-blue-50 rounded-lg cursor-pointer flex justify-between items-center border-b border-gray-50 last:border-0">
+            <div>
+              <span class="font-bold text-gray-800">${p.name}</span>
+              <span class="text-[10px] text-gray-400 block">${p.detail}</span>
+            </div>
+            <span class="text-blue-600 text-[10px] font-bold">선택</span>
+          </div>
+        `).join("");
+      } catch (err) {
+        resultsDiv.innerHTML = `<div class="p-2 text-red-500">검색 통신 에러</div>`;
+      }
+    }
+
+    function selectPlace(type, name, x, y) {
+      if (type === 'start') {
+        selectedStart = { name, x, y };
+        document.getElementById('startInput').value = name;
+        document.getElementById('startSearchResults').classList.add("hidden");
+      } else {
+        selectedEnd = { name, x, y };
+        document.getElementById('endInput').value = name;
+        document.getElementById('endSearchResults').classList.add("hidden");
+      }
+    }
+
+    // 자연어 텍스트를 실시간으로 좌표로 변환하는 헬퍼 함수
+    async function resolveCoords(text, type) {
+      // 1. 이미 드롭다운에서 선택된 경우
+      if (type === 'start' && selectedStart) return selectedStart;
+      if (type === 'end' && selectedEnd) return selectedEnd;
+
+      // 2. 실시간 자연어 검색으로 1등 결과 좌표 획득
+      const res = await fetch(`/api/search-place?keyword=${encodeURIComponent(text)}`);
+      const data = await res.json();
+      if (data.success && data.places.length > 0) {
+        return { name: data.places[0].name, x: data.places[0].x, y: data.places[0].y };
+      }
+      throw new Error(`'${text}' 위치를 찾을 수 없습니다. 정확한 명칭을 입력해주세요.`);
+    }
+
+    // GPS 위치로 출발지 채우기
+    function getUserLocation() {
+      const input = document.getElementById("startInput");
+      if ("geolocation" in navigator) {
+        input.value = "위치 수신 중...";
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            selectedStart = { name: "현재 GPS 위치", x: pos.coords.longitude, y: pos.coords.latitude };
+            input.value = `📍 현재 위치 (${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)})`;
+          },
+          (err) => {
+            alert("GPS 신호를 잡을 수 없습니다. 텍스트로 출발지(예: 사당역)를 입력해주세요.");
+            input.value = "사당역";
+          },
+          { enableHighAccuracy: true, timeout: 5000 }
+        );
+      }
+    }
+
+    // 최적 경로 탐색 실행
+    async function searchTransitRoute() {
+      const container = document.getElementById("routeResults");
+      const btn = document.getElementById("searchRouteBtn");
+      const startText = document.getElementById("startInput").value.trim();
+      const endText = document.getElementById("endInput").value.trim();
+
+      if (!startText || !endText) {
+        alert("출발지와 목적지를 모두 입력해주세요!");
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerText = "장소 위치 파악 중...";
+      container.innerHTML = `<div class="text-center py-8 text-xs text-gray-400 animate-pulse">실시간 지오코딩 및 최적 경로 계산 중...</div>`;
+
+      try {
+        // 자연어 장소명을 좌표로 동적 변환
+        const startCoord = await resolveCoords(startText, 'start');
+        const endCoord = await resolveCoords(endText, 'end');
+
+        btn.innerText = "대중교통 경로 계산 중...";
+
+        const url = `/api/directions?startX=${startCoord.x}&startY=${startCoord.y}&endX=${endCoord.x}&endY=${endCoord.y}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        btn.disabled = false;
+        btn.innerText = "최적 경로 검색하기";
+
+        if (!data.success || data.paths.length === 0) {
+          container.innerHTML = `
+            <div class="p-4 bg-gray-50 rounded-xl text-center text-xs text-red-500">
+              ${data.error || "이용 가능한 대중교통 경로가 없습니다."}
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = data.paths.map((p) => {
+          let alert7790HTML = "";
+          if (p.includes7790 && p.status7790) {
+            const isResv = p.status7790.isReserved;
+            alert7790HTML = `
+              <div class="mt-2.5 p-2.5 rounded-xl ${isResv ? 'bg-rose-50 border border-rose-300 text-rose-800' : 'bg-emerald-50 border border-emerald-300 text-emerald-800'} text-xs flex items-center space-x-2">
+                <span class="text-base">${isResv ? '⚠️' : '✅'}</span>
+                <div>
+                  <div class="font-bold">
+                    ${isResv ? '현재 오는 7790은 [전세버스 (탑승불가)] 입니다!' : '현재 오는 7790은 [일반 버스 (탑승가능)] 입니다!'}
+                  </div>
+                  <div class="text-[10px] opacity-80 mt-0.5">사당역 도착 예정: 약 ${p.status7790.predictTimeMin}분 후 (${p.status7790.remainSeats}석)</div>
+                </div>
+              </div>
+            `;
+          }
+
+          const stepsHTML = p.steps.map(s => {
+            if (s.type === 'walk') {
+              return `<span class="text-[11px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">도보 ${s.time}분</span>`;
+            } else if (s.type === 'bus') {
+              const is7790 = s.name.includes("7790");
+              return `<span class="text-[11px] font-bold ${is7790 ? 'bg-red-500 text-white' : 'bg-blue-500 text-white'} px-2 py-0.5 rounded shadow-sm">🚌 ${s.name} (${s.time}분)</span>`;
+            } else if (s.type === 'subway') {
+              return `<span class="text-[11px] font-bold bg-amber-500 text-white px-2 py-0.5 rounded shadow-sm">🚇 ${s.name} (${s.time}분)</span>`;
+            }
+          }).join(`<span class="text-gray-300"> ➔ </span>`);
+
+          return `
+            <div class="p-4 bg-white rounded-2xl border border-gray-200 shadow-sm hover:border-blue-300 transition">
+              <div class="flex justify-between items-baseline mb-2">
+                <div class="flex items-baseline space-x-1.5">
+                  <span class="text-xl font-black text-blue-600">${p.totalTime}분</span>
+                  <span class="text-xs text-gray-400">환승 ${p.transferCount}회 · 도보 ${p.totalWalk}m</span>
+                </div>
+                <span class="text-xs font-bold text-gray-600">${p.payment.toLocaleString()}원</span>
+              </div>
+              <div class="flex flex-wrap items-center gap-1.5 my-2">
+                ${stepsHTML}
+              </div>
+              ${alert7790HTML}
+            </div>
+          `;
+        }).join("");
+
+      } catch (err) {
+        btn.disabled = false;
+        btn.innerText = "최적 경로 검색하기";
+        container.innerHTML = `<div class="p-4 text-center text-xs text-red-500">${err.message || '통신 에러가 발생했습니다.'}</div>`;
+      }
+    }
+
+    // 7790 노선도 기본 로직
+    function toggleTestMode() {
+      isTestMode = !isTestMode;
+      const btn = document.getElementById("testModeBtn");
+      const banner = document.getElementById("testBanner");
+      if (isTestMode) {
+        btn.classList.replace("bg-amber-50", "bg-rose-600");
+        btn.classList.replace("text-amber-700", "text-white");
+        btn.innerText = "🛑 테스트 종료";
+        banner.classList.remove("hidden");
+      } else {
+        btn.classList.replace("bg-rose-600", "bg-amber-50");
+        btn.classList.replace("text-white", "text-amber-700");
+        btn.innerText = "🧪 전세 테스트";
+        banner.classList.add("hidden");
+      }
+      fetchBusData();
+    }
+
+    function scrollToSadang() {
+      const target = document.getElementById("station-target");
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    async function fetchBusData() {
+      const refreshBtn = document.getElementById("refreshBtn");
+      const arrivalContainer = document.getElementById("arrivalCards");
+      const timelineContainer = document.getElementById("routeTimeline");
+      const updateTime = document.getElementById("updateTime");
+
+      refreshBtn.classList.add("animate-spin");
+
+      try {
+        const res = await fetch("/api/buses");
+        const data = await res.json();
+        refreshBtn.classList.remove("animate-spin");
+
+        const now = new Date();
+        updateTime.innerText = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} 갱신`;
+
+        let arrivals = data.arrivingBuses || [];
+        let vehicles = data.vehicles || [];
+        const stations = data.stations || [];
+
+        if (isTestMode) {
+          arrivals = [
+            { routeName: "7790(예약)", isReserved: true, predictTimeMin: 3, remainStations: 1, remainSeats: 45, shortPlate: "9999", plateNo: "경기70바9999" },
+            { routeName: "7790", isReserved: false, predictTimeMin: 9, remainStations: 4, remainSeats: 58, shortPlate: "4541", plateNo: "경기76아4541" }
+          ];
+          const turnStation = stations.find(s => s.isTurn);
+          if (turnStation) {
+            vehicles.unshift({ plateNo: "경기70바9999", shortPlate: "9999", remainSeats: 45, isReserved: true, isDoubleDecker: false, currentStationId: turnStation.id, dir: "UP" });
+          }
+        }
+
+        if (arrivals.length === 0) {
+          arrivalContainer.innerHTML = `<div class="p-3 bg-white rounded-xl border border-gray-200 text-center text-xs text-gray-400">현재 운행 중인 7790번이 없습니다.</div>`;
+        } else {
+          arrivalContainer.innerHTML = arrivals.map(bus => {
+            const isReserved = bus.isReserved;
+            const badgeBg = isReserved ? "bg-rose-600 text-white" : "bg-emerald-600 text-white";
+            const badgeText = isReserved ? "🔴 전세 (탑승불가)" : "🟢 일반 (탑승가능)";
+            const cardBg = isReserved ? "bg-rose-50 border-rose-300" : "bg-white border-gray-200";
+
+            return `
+              <div class="p-3 rounded-xl border ${cardBg} shadow-sm flex justify-between items-center">
+                <div class="flex items-center space-x-2">
+                  <span class="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded">직행</span>
+                  <div>
+                    <div class="flex items-center space-x-1.5">
+                      <span class="text-sm font-black text-gray-900">7790</span>
+                      <span class="text-xs font-bold ${isReserved ? 'text-rose-600' : 'text-emerald-700'}">${bus.predictTimeMin}분 후</span>
+                      <span class="text-xs text-gray-400">(${bus.remainStations}개 전)</span>
+                    </div>
+                    <div class="text-[11px] text-gray-400">${bus.shortPlate} · 잔여 ${bus.remainSeats}석</div>
+                  </div>
+                </div>
+                <span class="text-[11px] font-black px-2.5 py-1 rounded-full shadow-sm ${badgeBg}">
+                  ${badgeText}
+                </span>
+              </div>
+            `;
+          }).join("");
+        }
+
+        let timelineHTML = `<div class="absolute left-[13px] top-3 bottom-3 w-[4px] bg-emerald-500 rounded-full"></div>`;
+
+        stations.forEach((st) => {
+          const isTarget = st.isTarget;
+          const isTurn = st.isTurn;
+          const isPass = st.isPass;
+          const matchedVehicles = vehicles.filter(v => v.currentStationId === st.id);
+
+          let nodeDot = `<div class="w-3.5 h-3.5 rounded-full border-2 border-emerald-500 bg-white z-10"></div>`;
+          if (isPass) nodeDot = `<div class="w-2 h-2 rounded-full bg-gray-300 z-10"></div>`;
+          else if (isTurn) nodeDot = `<div class="relative z-10 flex items-center justify-center"><div class="w-4 h-4 rounded-full border-2 border-red-500 bg-white"></div><span class="absolute -left-9 text-[10px] font-bold text-red-500 bg-red-50 px-1 rounded">회차</span></div>`;
+          else if (isTarget) nodeDot = `<div class="w-4 h-4 rounded-full border-4 border-yellow-400 bg-white z-10 shadow"></div>`;
+
+          let vehiclePinsHTML = "";
+          if (matchedVehicles.length > 0) {
+            vehiclePinsHTML = matchedVehicles.map(v => {
+              const isResv = v.isReserved;
+              const pinBorder = isResv ? "border-rose-500" : "border-emerald-600";
+              const pinBadgeBg = isResv ? "bg-rose-500 text-white" : "bg-emerald-600 text-white";
+              const pinBadgeLabel = isResv ? "전세" : "일반";
+
+              return `
+                <div class="live-bus-pin absolute right-0 -top-3.5 flex items-center space-x-1.5 bg-white border-2 ${pinBorder} px-2 py-1 rounded-xl shadow-lg z-20">
+                  <span class="text-xs font-black text-gray-900">${v.shortPlate}</span>
+                  <span class="text-[10px] text-gray-500 font-bold">${v.remainSeats}석</span>
+                  ${v.isDoubleDecker ? '<span class="text-[9px] bg-gray-100 text-gray-600 px-1 py-0.5 rounded font-bold">2층</span>' : ''}
+                  <span class="text-xs">🚌</span>
+                  <span class="text-[10px] font-black px-1.5 py-0.5 rounded-full ${pinBadgeBg}">${pinBadgeLabel}</span>
+                </div>
+              `;
+            }).join("");
+          }
+
+          timelineHTML += `
+            <div id="${isTarget ? 'station-target' : ''}" class="relative flex items-center py-2.5 ${isTarget ? 'bg-blue-50/70 -mx-3 px-3 rounded-xl border border-blue-200' : ''}">
+              <div class="absolute left-[-21px] flex items-center justify-center">${nodeDot}</div>
+              <div class="flex-1 ml-3 pr-36">
+                <div class="text-xs ${isTarget ? 'text-blue-900 font-black text-sm' : isPass ? 'text-gray-400 font-normal' : 'text-gray-700 font-medium'}">
+                  ${st.name}
+                  ${isTarget ? '<span class="ml-1 text-[11px] text-blue-600 font-bold">● 여기서 수원대행 탑승</span>' : ''}
+                  ${isPass ? '<span class="text-[10px] text-gray-400 block font-normal">미정차</span>' : ''}
+                </div>
+              </div>
+              ${vehiclePinsHTML}
+            </div>
+          `;
+        });
+
+        timelineContainer.innerHTML = timelineHTML;
+
+      } catch (err) {
+        console.error("데이터 로드 오류:", err);
+      }
+    }
+
+    fetchBusData();
+    setInterval(fetchBusData, 15000);
+  </script>
+</body>
+</html>
