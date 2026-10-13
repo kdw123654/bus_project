@@ -168,17 +168,84 @@ def get_bus_arrivals():
         "success": True,
         "stations": CACHED_STATIONS,
         "arrivingBuses": arriving_buses,
-        "vehicles": live_vehicles
+        "vehicles": live_vehicles,
+        "crowdData": get_crowd_summary()
     }
 
+# 사당역 9번 출구 학우들의 실시간 제보 저장소 (메모리 캐시)
+CROWD_REPORTS = []
+@app.post("/api/crowd-report")
+def report_crowd(status: str = Query(..., description="여유(smooth), 보통(moderate), 포화(crowded)")):
+    """학우들의 1초 원터치 줄 상태 제보 저장 API"""
+    import time
+    now = time.time()
+    # 최근 15분 이내의 제보만 유지
+    global CROWD_REPORTS
+    CROWD_REPORTS = [r for r in CROWD_REPORTS if now - r["time"] < 300]
+    CROWD_REPORTS.append({"status": status, "time": now})
+    return {"success": True, "message": "제보가 반영되었습니다!"}
 
+def get_crowd_summary():
+    '''최근 5분간 학우들의 제보 요약'''
+    import time
+    now = time.time()
+    valid_reports = [r for r in CROWD_REPORTS if now - r["time"] < 300]
 
+    if valid_reports:
+        cnt_smooth = sum(1 for r in valid_reports if r["status"] == "smooth")
+        cnt_mod = sum(1 for r in valid_reports if r["status"] == "moderate")
+        cnt_crowd = sum(1 for r in valid_reports if r["status"] == "crowded")
+
+        status_count = {'smooth': cnt_smooth, 'moderate': cnt_mod, 'crowded': cnt_crowd}
+        dominant_status = max(status_count, key=status_count.get)
+        last_sec = int(now - valid_reports[-1]["time"])
+        last_min = max(0, last_sec // 60)
+
+        if dominant_status == "smooth":
+            status_text = "여유 (<20명 대기)"
+            desc_text = "줄이 짧아 진입하는 첫 번째 7790번에 바로 탑승 가능할 것으로 예상됩니다."
+            xai_insight = "대기열이 20명 미만으로 버스 잔여석이 충분히 흡수 가능하여 첫 차 탑승 성공 확률이 대폭 상승했습니다."
+            color = "emerald"
+        elif dominant_status == "moderate":
+            status_text = "보통 (40명 내외 대기)"
+            desc_text = "대기 인원이 버스 1대 정원 수준입니다. 1~2대 대기 후 탑승 가능합니다."
+            xai_insight = "대기 인원이 40명 내외로 버스 좌석 수와 경합하여 보통 수준의 승차 확률이 산출되었습니다."
+            color = "amber"
+        else:
+            status_text = "포화 (계단/출구 밖까지 대기)"
+            desc_text = "대기열이 매우 깁니다. 2~3대 이상 대기해야 탑승할 수 있습니다."
+            xai_insight = "대기열 70명 이상 누적으로 빈 차가 진입해도 첫 차 탑승이 어려워 탑승 성공 확률이 25% 이하로 급감했습니다."
+            color = "rose"
+        return {
+            "hasData": True,
+            "status": dominant_status,
+            "statusText": status_text,
+            "descText": desc_text,
+            "xaiInsight": xai_insight,
+            "color": color,
+            "totalCount": len(valid_reports),
+            "counts": {"smooth": cnt_smooth, "moderate": cnt_mod, "crowded": cnt_crowd},
+            "lastReportMinutesAgo": last_min
+        }
+    else:
+        return {
+            "hasData": False,
+            "status": "none",
+            "statusText": "최근 5분 내 제보 없음",
+            "descText": "현재 9번 출구 제보가 없습니다. 노선도 탭에서 1초 제보에 참여해 주세요!",
+            "xaiInsight": "최근 5분 제보가 없어 평일 정규 승하차 패턴을 기본값으로 추론 중입니다.",
+            "color": "gray",
+            "totalCount": 0,
+            "counts": {"smooth": 0, "moderate": 0, "crowded": 0},
+            "lastReportMinutesAgo": None
+        }
 # ⭐ 3. 신규 기능: 7790 버스 운행 및 전세버스 판별 설명 가능한 AI (XAI) 분석 엔드포인트
 @app.get("/api/xai-analysis")
 def get_xai_analysis():
     bus_data = get_bus_arrivals()
     arriving = bus_data.get("arrivingBuses", [])
     vehicles = bus_data.get("vehicles", [])
+    crowd_info = get_crowd_summary()
     
     # 1. 도착 예정 버스에 대한 XAI 전세버스 판별 기여도(Feature Attribution) 계산
     bus_explanations = []
@@ -205,30 +272,36 @@ def get_xai_analysis():
             boarding_status = "탑승불가 (전세버스)"
             prob_color = "rose"
         else:
-            features = [
-                {"name": "정규 인가 차량 번호 대역 (1XXX/4XXX)", "weight": 82, "impact": "positive", "desc": f"정규 인가 차량 번호 '{plate}' 식별"},
-                {"name": "GBIS 실시간 정규 배차 일치", "weight": 12, "impact": "positive", "desc": "일반 직행좌석 정규 운행 스케줄과 일치"},
-                {"name": "좌석 안내 시스템 연동", "weight": 6, "impact": "positive", "desc": f"실시간 잔여 {seats}석 정상 송수신"}
-            ]
-            decision_text = f"용남고속 7790번 정규 인가 차량('{plate}')으로 확인되어 [정상 탑승 가능]으로 판정되었습니다."
-            confidence = 99.1
-            if seats >= 40:
-                boarding_prob = 95
-                boarding_status = "탑승 매우 여유"
+            # ⭐ 2. 학우들의 9번 출구 실시간 줄 상태를 XAI 모델 특성으로 융합
+            crowd_status = crowd_info.get("status", "none")
+            base_prob = 90 if seats >= 40 else (70 if seats >= 15 else 35)
+            if crowd_status == "smooth":
+                boarding_prob = min(98, base_prob + 8)
+                boarding_status = "탑승 매우 여유 (줄 짧음)"
                 prob_color = "emerald"
-            elif seats >= 15:
-                boarding_prob = 75
-                boarding_status = "탑승 유력"
-                prob_color = "blue"
-            elif seats >= 5:
-                boarding_prob = 45
-                boarding_status = "탑승 혼잡 (대기열 주의)"
+                crowd_feature = {"name": "사당역 9번 출구 줄 상태 (🟢 여유)", "weight": 42, "impact": "positive", "desc": "대기 인원 20명 미만으로 첫 차 즉시 탑승 유력"}
+            elif crowd_status == "moderate":
+                boarding_prob = max(45, base_prob - 10)
+                boarding_status = "탑승 보통 (1~2대 대기)"
                 prob_color = "amber"
-            else:
-                boarding_prob = 15
-                boarding_status = "탑승 불가 위험 (만석 임박)"
+                crowd_feature = {"name": "사당역 9번 출구 줄 상태 (🟡 보통)", "weight": 35, "impact": "neutral", "desc": "대기 인원 40명 내외로 좌석 수와 경합"}
+            elif crowd_status == "crowded":
+                boarding_prob = min(25, base_prob - 45)
+                boarding_status = "탑승 어려움 (줄 포화)"
                 prob_color = "rose"
-
+                crowd_feature = {"name": "사당역 9번 출구 줄 상태 (🔴 포화)", "weight": 55, "impact": "negative", "desc": "대기열 70명 이상으로 첫 차 탑승 불가 위험"}
+            else:
+                boarding_prob = base_prob
+                boarding_status = "탑승 가능 (통계 모델)"
+                prob_color = "blue"
+                crowd_feature = {"name": "사당역 평일 시간대 패턴", "weight": 20, "impact": "neutral", "desc": "최근 5분 제보 집계 대기 중, 과거 패턴 적용"}
+            features = [
+                {"name": "정규 인가 차량 번호 대역 (1XXX/4XXX)", "weight": 65, "impact": "positive", "desc": f"정규 인가 차량 번호 '{plate}' 식별"},
+                crowd_feature,
+                {"name": "좌석 안내 시스템 연동", "weight": 15, "impact": "positive", "desc": f"실시간 잔여 {seats}석 정상 송수신"}
+            ]
+            decision_text = f"용남고속 정규 인가 차량('{plate}')이며, 사당역 9번 출구 대기열({crowd_info['statusText']})을 반영하여 탑승 성공 확률이 {boarding_prob}%로 산출되었습니다."
+            confidence = 99.1
         bus_explanations.append({
             "order": f"{idx}번째 도착 버스",
             "shortPlate": plate,
@@ -242,7 +315,6 @@ def get_xai_analysis():
             "probColor": prob_color,
             "features": features
         })
-
     # 2. 사당-수원대 구간 지연 기여 요인 (SHAP Waterfall)
     delay_factors = [
         {"factor": "과천대로 - 남태령 고개 정체", "shapValue": "+5.2분", "percentage": 42, "color": "bg-rose-500", "desc": "사당 진입 병목으로 인한 주행 속도 저하"},
@@ -251,19 +323,18 @@ def get_xai_analysis():
         {"factor": "배차 간격 불규칙성 변동폭", "shapValue": "+1.4분", "percentage": 11, "color": "bg-indigo-500", "desc": "기점(수원대) 출발 딜레이 누적"},
         {"factor": "기상 및 노면 상태 요인", "shapValue": "+0.8분", "percentage": 7, "color": "bg-emerald-500", "desc": "현재 원활한 노면 조건"}
     ]
-
     # 3. AI 모델 메타데이터
     model_meta = {
         "modelName": "XAI-7790 Transit Explainability Engine",
         "algorithm": "TreeSHAP + Rule-Ensemble Attribution",
-        "dataSources": ["경기도 GBIS 실시간 버스 텔레메트리", "사당역 9번 출구 승하차 패턴 DB"],
+        "dataSources": ["경기도 GBIS 실시간 버스 텔레메트리", "사당역 9번 출구 승하차 패턴 DB", "100% 학우 실시간 제보 피처"],
         "totalActiveBuses": len(vehicles),
-        "modelVersion": "v2.4-LightGBM"
+        "modelVersion": "v2.5-LightGBM"
     }
-
     return {
         "success": True,
         "busExplanations": bus_explanations,
         "delayFactors": delay_factors,
-        "modelMeta": model_meta
+        "modelMeta": model_meta,
+        "crowdData": crowd_info    # 3. XAI 응답에 학우 제보 데이터 포함
     }

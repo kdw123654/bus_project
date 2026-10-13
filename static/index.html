@@ -24,11 +24,13 @@
     
     <!-- 최상단 네비게이션 탭 -->
     <div class="grid grid-cols-2 bg-gray-100 p-1.5 border-b border-gray-200 sticky top-0 z-40">
-      <button id="tabRouteBtn" onclick="switchTab('route')" class="py-2 text-xs font-black rounded-lg transition bg-white text-blue-600 shadow-sm flex items-center justify-center space-x-1">
-        <span>🚌</span> <span>7790 노선도</span>
+      <button id="tabRouteBtn" onclick="switchTab('route')" class="py-2 text-xs font-black rounded-lg transition bg-white text-blue-600 shadow-sm flex items-center justify-center space-x-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+        <span>7790 노선도</span>
       </button>
-      <button id="tabXaiBtn" onclick="switchTab('xai')" class="py-2 text-xs font-black rounded-lg transition text-gray-500 hover:text-gray-900 flex items-center justify-center space-x-1">
-        <span>🧠</span> <span>XAI 지능형 분석</span>
+      <button id="tabXaiBtn" onclick="switchTab('xai')" class="py-2 text-xs font-black rounded-lg transition text-gray-500 hover:text-gray-900 flex items-center justify-center space-x-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        <span>XAI 지능형 분석</span>
       </button>
     </div>
 
@@ -42,10 +44,10 @@
         </div>
         <div class="flex items-center space-x-2">
           <button id="testModeBtn" onclick="toggleTestMode()" class="text-[11px] font-bold px-2.5 py-1.5 rounded-full border border-amber-300 bg-amber-50 text-amber-700">
-            🧪 전세 테스트
+            전세 테스트
           </button>
           <button onclick="scrollToSadang()" class="text-[11px] bg-blue-50 text-blue-600 font-bold px-2 py-1.5 rounded-full border border-blue-200">
-            📍 사당역
+            사당역
           </button>
           <button onclick="fetchBusData()" id="refreshBtn" class="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600">
             🔄
@@ -54,7 +56,7 @@
       </header>
 
       <div id="testBanner" class="hidden bg-amber-500 text-white text-xs px-4 py-2 font-bold flex justify-between items-center shadow-inner">
-        <span>⚠️ [가상 테스트] 출근 전세버스가 투입된 상황입니다</span>
+        <span>[가상 테스트] 출근 전세버스가 투입된 상황입니다</span>
         <button onclick="toggleTestMode()" class="underline text-[11px]">종료</button>
       </div>
 
@@ -69,6 +71,37 @@
         <div id="arrivalCards" class="space-y-2">
           <div class="text-xs text-gray-400 text-center py-2 animate-pulse">도착 정보 조회 중...</div>
         </div>
+
+        <!-- 사당역 9번 출구 학우 1초 제보 및 줄 현황판 (노선도 탭에 탑재) -->
+        <div id="routeCrowdCard" class="mt-3 p-3.5 bg-white rounded-xl border border-blue-200 shadow-xs space-y-2.5">
+          <div class="flex items-center space-x-1.5">
+            <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+            <span class="text-xs font-black text-gray-900 tracking-tight">사당역 9번 출구 대기열 실시간 현황</span>
+          </div>
+          <p id="routeCrowdDesc" class="text-[11px] text-gray-500 leading-snug">
+            학우들의 실시간 줄 제보가 AI 분석 모델에 반영됩니다. 상세 탑승 확률과 분석 리포트는 상단 <button onclick="switchTab('xai')" class="text-indigo-600 font-bold underline">[XAI 지능형 분석]</button> 탭에서 확인하세요.
+          </p>
+          <div class="pt-2 border-t border-gray-100">
+            <div class="flex justify-between items-center text-[10px] text-gray-400 mb-1.5 font-bold">
+              <span>지금 9번 출구 줄에 계신가요? 1초 제보</span>
+              <span id="routeCrowdTime">최근 5분 집계</span>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button onclick="sendCrowdReport('smooth')" class="py-2 px-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 active:scale-95 border border-emerald-300 text-emerald-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
+                <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block mr-1"></span>여유</span>
+                <span class="text-[9px] font-medium text-emerald-600 mt-0.5">&lt;20명 대기</span>
+              </button>
+              <button onclick="sendCrowdReport('moderate')" class="py-2 px-1 rounded-lg bg-amber-50 hover:bg-amber-100 active:scale-95 border border-amber-300 text-amber-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
+                <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block mr-1"></span>보통</span>
+                <span class="text-[9px] font-medium text-amber-600 mt-0.5">40명 내외</span>
+              </button>
+              <button onclick="sendCrowdReport('crowded')" class="py-2 px-1 rounded-lg bg-rose-50 hover:bg-rose-100 active:scale-95 border border-rose-300 text-rose-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
+                <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-rose-500 inline-block mr-1"></span>포화</span>
+                <span class="text-[9px] font-medium text-rose-600 mt-0.5">계단까지</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <main class="flex-1 px-4 py-6 overflow-y-auto" id="timelineScrollArea">
@@ -80,13 +113,13 @@
     <div id="xaiView" class="hidden flex-1 flex flex-col p-4 space-y-4 overflow-y-auto">
       
       <!-- 상단 안내 헤더 -->
-      <div class="bg-gradient-to-r from-indigo-900 via-indigo-800 to-blue-900 text-white p-4 rounded-2xl shadow-md space-y-1.5">
+      <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 text-white p-4 rounded-2xl shadow-md space-y-1.5">
         <div class="flex justify-between items-center">
           <div class="flex items-center space-x-1.5">
-            <span class="text-base">🧠</span>
+            <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
             <span class="text-xs font-black tracking-wide">XAI (Explainable AI) Engine</span>
           </div>
-          <span class="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-bold">TreeSHAP v2.4</span>
+          <span class="text-[10px] bg-white/10 px-2 py-0.5 rounded-full font-bold">TreeSHAP v2.5</span>
         </div>
         <h2 class="text-sm font-black tracking-tight">7790 버스 운행 및 전세버스 판별 설명</h2>
         <p class="text-[11px] text-indigo-200 leading-snug">
@@ -110,7 +143,10 @@
 
   <script>
     let isTestMode = false;
+    let currentTab = 'route';
+
     function switchTab(tab) {
+      currentTab = tab;
       const routeView = document.getElementById("routeView");
       const xaiView = document.getElementById("xaiView");
       const tabRouteBtn = document.getElementById("tabRouteBtn");
@@ -134,10 +170,29 @@
       }
     }
 
-    // ⭐ XAI (Explainable AI) 데이터 로드 및 시각화
-    async function fetchXaiData() {
+    // ⭐ 학우 실시간 줄 제보 전송 함수
+    async function sendCrowdReport(status) {
+      try {
+        const res = await fetch(`/api/crowd-report?status=${encodeURIComponent(status)}`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+          alert("✅ 사당역 9번 출구 줄 제보가 등록되었습니다! 노선도 및 XAI 분석에 실시간 반영됩니다 🙏");
+          fetchBusData();
+          if (currentTab === 'xai') fetchXaiData(true);
+        } else {
+          alert("제보 처리에 실패했습니다.");
+        }
+      } catch (err) {
+        alert("제보 통신 오류가 발생했습니다: " + err.message);
+      }
+    }
+
+    // ⭐ XAI (Explainable AI) 및 학우 실시간 대기열 데이터 로드 및 시각화 (15초 주기 갱신)
+    async function fetchXaiData(isSilent = false) {
       const container = document.getElementById("xaiContent");
-      container.innerHTML = `<div class="p-6 bg-white rounded-2xl border border-gray-200 text-center text-xs text-gray-400 animate-pulse">실시간 XAI 특성 기여도(Feature Attribution) 분석 중...</div>`;
+      if (!isSilent && (!container.children.length || container.innerHTML.includes("분석 중..."))) {
+        container.innerHTML = `<div class="p-6 bg-white rounded-2xl border border-gray-200 text-center text-xs text-gray-400 animate-pulse">실시간 XAI 특성 기여도 및 학우 제보 분석 중...</div>`;
+      }
 
       try {
         const res = await fetch("/api/xai-analysis");
@@ -148,11 +203,92 @@
           return;
         }
 
+        // 0. 사당역 9번 출구 100% 학우 실시간 줄 XAI 영향도 분석 렌더링
+        const crowd = data.crowdData || {
+          hasData: false,
+          status: "none",
+          statusText: "최근 5분 내 제보 없음",
+          descText: "현재 사당역 9번 출구 대기열 제보가 없습니다. 노선도 탭에서 1초 제보에 참여해 주세요!",
+          xaiInsight: "최근 5분 제보 데이터가 없어 평일 정규 승하차 패턴을 기본값으로 추론 중입니다.",
+          color: "gray",
+          totalCount: 0,
+          counts: { smooth: 0, moderate: 0, crowded: 0 },
+          lastReportMinutesAgo: null
+        };
+
+        let crowdBadgeBg = "bg-gray-100 text-gray-700 border-gray-200";
+        let dotColor = "bg-gray-400";
+        if (crowd.status === "smooth") {
+          crowdBadgeBg = "bg-emerald-50 text-emerald-700 border-emerald-300";
+          dotColor = "bg-emerald-500";
+        } else if (crowd.status === "moderate") {
+          crowdBadgeBg = "bg-amber-50 text-amber-700 border-amber-300";
+          dotColor = "bg-amber-500";
+        } else if (crowd.status === "crowded") {
+          crowdBadgeBg = "bg-rose-50 text-rose-700 border-rose-300";
+          dotColor = "bg-rose-500";
+        }
+
+        const crowdTimeStr = crowd.lastReportMinutesAgo === null 
+          ? "제보 대기 중" 
+          : (crowd.lastReportMinutesAgo === 0 ? "방금 전 제보" : `${crowd.lastReportMinutesAgo}분 전 제보`);
+
+        const crowdCardHTML = `
+          <div class="p-4 rounded-2xl border border-indigo-200 shadow-sm space-y-2.5 bg-white">
+            <div class="flex justify-between items-center">
+              <div class="flex items-center space-x-1.5">
+                <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                <h3 class="text-xs font-black text-gray-900 tracking-tight">사당역 9번 출구 대기열 영향도 분석</h3>
+              </div>
+              <span class="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-full border border-indigo-200">
+                학우 제보 Feature 연동
+              </span>
+            </div>
+
+            <!-- 현재 줄 혼잡도 상태 및 XAI 영향 설명 -->
+            <div class="p-3 rounded-xl border ${crowdBadgeBg} space-y-1">
+              <div class="flex justify-between items-center">
+                <div class="flex items-center space-x-1.5">
+                  <span class="w-2 h-2 rounded-full ${dotColor} inline-block"></span>
+                  <span class="text-sm font-black">${crowd.statusText}</span>
+                </div>
+                <div class="text-right">
+                  <span class="text-[10px] text-gray-400 block">${crowdTimeStr}</span>
+                  <span class="text-[11px] font-bold text-indigo-600">최근 5분 ${crowd.totalCount}건 반영</span>
+                </div>
+              </div>
+              <p class="text-[11px] text-gray-700 leading-snug pt-0.5 font-medium">${crowd.xaiInsight || crowd.descText}</p>
+            </div>
+
+            <!-- 최근 5분 투표 분포 바 (제보가 있을 때만 표시) -->
+            ${crowd.totalCount > 0 ? `
+              <div class="space-y-1">
+                <div class="flex justify-between text-[10px] text-gray-500 font-bold">
+                  <span>제보 분포: 여유 ${crowd.counts.smooth}건 · 보통 ${crowd.counts.moderate}건 · 포화 ${crowd.counts.crowded}건</span>
+                  <span class="text-indigo-600 font-bold">AI 탑승 확률 반영 중</span>
+                </div>
+                <div class="w-full bg-gray-100 rounded-full h-1.5 flex overflow-hidden">
+                  <div class="bg-emerald-500 h-1.5" style="width: ${(crowd.counts.smooth / crowd.totalCount) * 100}%"></div>
+                  <div class="bg-amber-500 h-1.5" style="width: ${(crowd.counts.moderate / crowd.totalCount) * 100}%"></div>
+                  <div class="bg-rose-500 h-1.5" style="width: ${(crowd.counts.crowded / crowd.totalCount) * 100}%"></div>
+                </div>
+              </div>
+            ` : ''}
+
+            <!-- 노선도 탭 제보 바로가기 안내 -->
+            <div class="pt-1.5 border-t border-gray-100 flex justify-between items-center text-[10px] text-gray-500">
+              <span>실시간 줄 제보는 <strong>[7790 노선도]</strong> 탭에서 1초 만에 참여하실 수 있습니다.</span>
+              <button onclick="switchTab('route')" class="text-blue-600 font-bold underline flex-shrink-0 ml-1">노선도 이동</button>
+            </div>
+          </div>
+        `;
+
         // 1. 버스 판별 XAI Feature Attribution 카드 렌더링
         let busCardsHTML = data.busExplanations.map(bus => {
           const isResv = bus.isReserved;
           const badgeBg = isResv ? "bg-rose-600 text-white" : "bg-emerald-600 text-white";
-          const badgeLabel = isResv ? "🔴 전세버스 (탑승불가)" : "🟢 일반버스 (탑승가능)";
+          const badgeLabel = isResv ? "전세버스 (탑승불가)" : "일반버스 (탑승가능)";
+          const dotBadge = isResv ? '<span class="w-1.5 h-1.5 rounded-full bg-white/80 inline-block mr-1"></span>' : '<span class="w-1.5 h-1.5 rounded-full bg-white/80 inline-block mr-1"></span>';
           const cardBorder = isResv ? "border-rose-300 bg-rose-50/40" : "border-emerald-300 bg-emerald-50/40";
 
           const featuresHTML = bus.features.map(f => `
@@ -178,14 +314,14 @@
                     <span class="text-xs text-gray-500 font-bold">(${bus.remainSeats}석 잔여)</span>
                   </div>
                 </div>
-                <span class="text-[11px] font-black px-2.5 py-1 rounded-full shadow-sm ${badgeBg}">
-                  ${badgeLabel}
+                <span class="text-[11px] font-black px-2.5 py-1 rounded-full shadow-sm flex items-center ${badgeBg}">
+                  ${dotBadge} ${badgeLabel}
                 </span>
               </div>
 
               <!-- AI 설명 자연어 요약 -->
               <div class="p-2.5 bg-gray-50 rounded-xl text-xs text-gray-700 border border-gray-100 flex items-start space-x-2">
-                <span class="text-sm">💡</span>
+                <svg class="w-3.5 h-3.5 text-indigo-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 <span class="leading-relaxed font-medium">${bus.decisionText}</span>
               </div>
 
@@ -228,11 +364,15 @@
 
         // 3. 전체 합체 렌더링
         container.innerHTML = `
+          <!-- 0. 사당역 9번 출구 학우 실시간 줄 현황판 -->
+          ${crowdCardHTML}
+
           <!-- 1. 차량 판별 설명 섹션 -->
           <div class="space-y-2.5">
             <div class="flex justify-between items-center px-1">
-              <h3 class="text-xs font-black text-gray-800 flex items-center space-x-1">
-                <span>🎯</span> <span>실시간 버스 판별 근거 (Feature Importance)</span>
+              <h3 class="text-xs font-black text-gray-800 flex items-center space-x-1.5">
+                <svg class="w-3.5 h-3.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span>실시간 버스 판별 근거 (Feature Importance)</span>
               </h3>
               <span class="text-[10px] text-gray-400">GBIS 텔레메트리 연동</span>
             </div>
@@ -242,8 +382,9 @@
           <!-- 2. 지연 요인 SHAP 분석 섹션 -->
           <div class="p-4 bg-white rounded-2xl border border-gray-200 shadow-sm space-y-3">
             <div class="flex justify-between items-center">
-              <h3 class="text-xs font-black text-gray-800 flex items-center space-x-1">
-                <span>📊</span> <span>사당역 도착 지연 기여 요인 (SHAP 분석)</span>
+              <h3 class="text-xs font-black text-gray-800 flex items-center space-x-1.5">
+                <svg class="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span>사당역 도착 지연 기여 요인 (SHAP 분석)</span>
               </h3>
               <span class="text-[10px] bg-indigo-50 text-indigo-600 font-bold px-2 py-0.5 rounded-full">지연 기여도</span>
             </div>
@@ -257,8 +398,9 @@
 
           <!-- 3. XAI 모델 아키텍처 정보 -->
           <div class="p-3.5 bg-gray-50 rounded-2xl border border-gray-200 text-[11px] text-gray-500 space-y-1">
-            <div class="flex items-center space-x-1 text-gray-700 font-bold">
-              <span>🔬</span> <span>XAI 모델 아키텍처 (수원대 데이터과학부)</span>
+            <div class="flex items-center space-x-1.5 text-gray-700 font-bold">
+              <svg class="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+              <span>XAI 모델 아키텍처 (수원대 데이터과학부)</span>
             </div>
             <p>• 알고리즘: ${data.modelMeta.algorithm}</p>
             <p>• 학습 및 실시간 데이터: ${data.modelMeta.dataSources.join(" · ")}</p>
@@ -310,6 +452,17 @@
 
         const now = new Date();
         updateTime.innerText = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} 갱신`;
+
+        // ⭐ 사당역 9번 출구 학우 실시간 대기열 현황 업데이트 (노선도 카드)
+        const crowd = data.crowdData;
+        if (crowd) {
+          const time = document.getElementById("routeCrowdTime");
+          if (time) {
+            time.innerText = crowd.lastReportMinutesAgo === null 
+              ? "최근 5분 0건" 
+              : `최근 5분 ${crowd.totalCount}건 (${crowd.lastReportMinutesAgo === 0 ? "방금 전" : crowd.lastReportMinutesAgo + "분 전"})`;
+          }
+        }
 
         let arrivals = data.arrivingBuses || [];
         let vehicles = data.vehicles || [];
@@ -444,7 +597,14 @@
     }
 
     fetchBusData();
-    setInterval(fetchBusData, 15000);
+    // 15초마다 현재 열려있는 탭(7790 노선도 또는 XAI 학우 제보 현황판)을 실시간 자동 갱신
+    setInterval(() => {
+      if (currentTab === 'xai') {
+        fetchXaiData(true);
+      } else {
+        fetchBusData();
+      }
+    }, 15000);
   </script>
 </body>
 </html>
