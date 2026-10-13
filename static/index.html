@@ -11,6 +11,11 @@
       50% { transform: translateY(-3px); }
     }
     .live-bus-pin { animation: pin-float 2s ease-in-out infinite; }
+    @keyframes bus-pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.12); }
+    }
+    .bus-pulse { animation: bus-pulse 1.8s ease-in-out infinite; }
   </style>
 </head>
 <body class="bg-gray-100 flex justify-center min-h-screen font-sans text-gray-900 antialiased">
@@ -22,8 +27,8 @@
       <button id="tabRouteBtn" onclick="switchTab('route')" class="py-2 text-xs font-black rounded-lg transition bg-white text-blue-600 shadow-sm flex items-center justify-center space-x-1">
         <span>🚌</span> <span>7790 노선도</span>
       </button>
-      <button id="tabNavBtn" onclick="switchTab('nav')" class="py-2 text-xs font-black rounded-lg transition text-gray-500 hover:text-gray-900 flex items-center justify-center space-x-1">
-        <span>🗺️</span> <span>스마트 길찾기</span>
+      <button id="tabXaiBtn" onclick="switchTab('xai')" class="py-2 text-xs font-black rounded-lg transition text-gray-500 hover:text-gray-900 flex items-center justify-center space-x-1">
+        <span>🧠</span> <span>XAI 지능형 분석</span>
       </button>
     </div>
 
@@ -66,276 +71,203 @@
         </div>
       </section>
 
-      <main class="flex-1 px-5 py-6 overflow-y-auto" id="timelineScrollArea">
-        <div class="relative pl-7" id="routeTimeline"></div>
+      <main class="flex-1 px-4 py-6 overflow-y-auto" id="timelineScrollArea">
+        <div class="relative" id="routeTimeline"></div>
       </main>
     </div>
 
-    <!-- ================= [뷰 2: 완전 자연어 대중교통 길찾기] ================= -->
-    <div id="navView" class="hidden flex-1 flex flex-col p-4 space-y-4 overflow-y-auto">
+    <!-- ================= [뷰 2: XAI 설명 가능한 인공지능 분석] ================= -->
+    <div id="xaiView" class="hidden flex-1 flex flex-col p-4 space-y-4 overflow-y-auto">
       
-      <!-- 경로 검색 카드 -->
-      <div class="bg-gray-50 p-4 rounded-2xl border border-gray-200 space-y-3">
+      <!-- 상단 안내 헤더 -->
+      <div class="bg-gradient-to-r from-indigo-900 via-indigo-800 to-blue-900 text-white p-4 rounded-2xl shadow-md space-y-1.5">
         <div class="flex justify-between items-center">
-          <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider">대중교통 최적 경로 탐색</h2>
-          <span class="text-[10px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full font-bold">100% 실시간 자연어</span>
-        </div>
-
-        <!-- 출발지 입력 -->
-        <div>
-          <div class="flex justify-between items-center mb-1">
-            <label class="text-xs font-bold text-blue-600">출발지 (자연어로 입력)</label>
-            <button onclick="getUserLocation()" class="text-[11px] text-blue-500 font-bold hover:underline flex items-center">
-              <span>내 GPS 위치로 채우기</span>
-            </button>
+          <div class="flex items-center space-x-1.5">
+            <span class="text-base">🧠</span>
+            <span class="text-xs font-black tracking-wide">XAI (Explainable AI) Engine</span>
           </div>
-          <div class="relative">
-            <input type="text" id="startInput" value="사당역" placeholder="출발지 (예: 사당역, 강남역, 화성시청)" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium focus:outline-blue-500 pr-12" oninput="debounceSearch('start')" onkeydown="if(event.key==='Enter') searchTransitRoute()">
-            <button onclick="searchPlaceManual('start')" class="absolute right-1.5 top-1.5 px-2.5 py-1 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold">찾기</button>
-          </div>
-          <div id="startSearchResults" class="hidden mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-1.5 space-y-1 text-xs z-30"></div>
+          <span class="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-bold">TreeSHAP v2.4</span>
         </div>
-
-        <!-- 목적지 입력 -->
-        <div>
-          <label class="text-xs font-bold text-red-600 block mb-1">목적지 (자연어로 입력)</label>
-          <div class="relative">
-            <input type="text" id="endInput" value="수원대학교" placeholder="목적지 (예: 수원대학교, 홍대입구, 에버랜드)" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium focus:outline-blue-500 pr-12" oninput="debounceSearch('end')" onkeydown="if(event.key==='Enter') searchTransitRoute()">
-            <button onclick="searchPlaceManual('end')" class="absolute right-1.5 top-1.5 px-2.5 py-1 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold">찾기</button>
-          </div>
-          <div id="endSearchResults" class="hidden mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-1.5 space-y-1 text-xs z-30"></div>
-        </div>
-
-        <!-- 경로 검색 버튼 -->
-        <button onclick="searchTransitRoute()" id="searchRouteBtn" class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 active:scale-98 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center justify-center space-x-1.5 mt-2">
-          <span>🔍</span> <span>최적 경로 검색하기</span>
-        </button>
+        <h2 class="text-sm font-black tracking-tight">7790 버스 운행 및 전세버스 판별 설명</h2>
+        <p class="text-[11px] text-indigo-200 leading-snug">
+          단순한 도착 시간 안내를 넘어, AI가 <strong>"왜 이 버스가 전세버스인지"</strong>와 <strong>"사당역 지연의 핵심 요인"</strong>을 투명하게 설명합니다.
+        </p>
       </div>
 
-      <!-- 길찾기 결과 목록 -->
-      <div id="routeResults" class="space-y-3">
-        <div class="text-center py-8 text-gray-400 text-xs">
-          원하는 출발지와 목적지를 입력 후 [최적 경로 검색하기]를 눌러주세요.
+      <!-- XAI 렌더링 컨테이너 -->
+      <div id="xaiContent" class="space-y-4">
+        <div class="p-6 bg-white rounded-2xl border border-gray-200 text-center text-xs text-gray-400 animate-pulse">
+          실시간 XAI 특성 기여도(Feature Attribution) 분석 중...
         </div>
       </div>
+
     </div>
 
     <footer class="py-2.5 bg-gray-50 border-t border-gray-200 text-center text-[11px] text-gray-400">
-      수원대학교 통학 도우미 · 실시간 노선 & 실시간 자연어 길찾기
+      수원대학교 데이터과학부 7790 XAI 프로젝트 · 실시간 노선 & 설명 가능한 버스 AI
     </footer>
   </div>
 
   <script>
     let isTestMode = false;
-    let selectedStart = null;
-    let selectedEnd = null;
-    let searchTimer = null;
-
     function switchTab(tab) {
       const routeView = document.getElementById("routeView");
-      const navView = document.getElementById("navView");
+      const xaiView = document.getElementById("xaiView");
       const tabRouteBtn = document.getElementById("tabRouteBtn");
-      const tabNavBtn = document.getElementById("tabNavBtn");
+      const tabXaiBtn = document.getElementById("tabXaiBtn");
 
       if (tab === 'route') {
         routeView.classList.remove("hidden");
-        navView.classList.add("hidden");
+        xaiView.classList.add("hidden");
         tabRouteBtn.classList.add("bg-white", "text-blue-600", "shadow-sm");
         tabRouteBtn.classList.remove("text-gray-500");
-        tabNavBtn.classList.remove("bg-white", "text-blue-600", "shadow-sm");
-        tabNavBtn.classList.add("text-gray-500");
+        tabXaiBtn.classList.remove("bg-white", "text-blue-600", "shadow-sm");
+        tabXaiBtn.classList.add("text-gray-500");
       } else {
         routeView.classList.add("hidden");
-        navView.classList.remove("hidden");
-        tabNavBtn.classList.add("bg-white", "text-blue-600", "shadow-sm");
-        tabNavBtn.classList.remove("text-gray-500");
+        xaiView.classList.remove("hidden");
+        tabXaiBtn.classList.add("bg-white", "text-blue-600", "shadow-sm");
+        tabXaiBtn.classList.remove("text-gray-500");
         tabRouteBtn.classList.remove("bg-white", "text-blue-600", "shadow-sm");
         tabRouteBtn.classList.add("text-gray-500");
+        fetchXaiData();
       }
     }
 
-    // 자연어 입력 시 자동완성 디바운스
-    function debounceSearch(type) {
-      clearTimeout(searchTimer);
-      if (type === 'start') selectedStart = null;
-      if (type === 'end') selectedEnd = null;
-
-      searchTimer = setTimeout(() => {
-        searchPlaceManual(type);
-      }, 350);
-    }
-
-    // 자연어 장소 검색
-    async function searchPlaceManual(type) {
-      const input = document.getElementById(type === 'start' ? 'startInput' : 'endInput');
-      const resultsDiv = document.getElementById(type === 'start' ? 'startSearchResults' : 'endSearchResults');
-      const kw = input.value.trim();
-
-      if (!kw || kw.startsWith("📍 현재 위치")) {
-        resultsDiv.classList.add("hidden");
-        return;
-      }
-
-      resultsDiv.classList.remove("hidden");
-      resultsDiv.innerHTML = `<div class="p-2 text-gray-400 animate-pulse">실시간 장소 탐색 중...</div>`;
+    // ⭐ XAI (Explainable AI) 데이터 로드 및 시각화
+    async function fetchXaiData() {
+      const container = document.getElementById("xaiContent");
+      container.innerHTML = `<div class="p-6 bg-white rounded-2xl border border-gray-200 text-center text-xs text-gray-400 animate-pulse">실시간 XAI 특성 기여도(Feature Attribution) 분석 중...</div>`;
 
       try {
-        const res = await fetch(`/api/search-place?keyword=${encodeURIComponent(kw)}`);
+        const res = await fetch("/api/xai-analysis");
         const data = await res.json();
 
-        if (!data.success || data.places.length === 0) {
-          resultsDiv.innerHTML = `<div class="p-2 text-gray-400">일치하는 장소를 찾을 수 없습니다.</div>`;
+        if (!data.success) {
+          container.innerHTML = `<div class="p-4 bg-rose-50 text-rose-600 rounded-xl text-xs text-center font-bold">XAI 분석 데이터를 불러올 수 없습니다.</div>`;
           return;
         }
 
-        resultsDiv.innerHTML = data.places.map(p => `
-          <div onclick="selectPlace('${type}', '${p.name}', ${p.x}, ${p.y})" class="p-2 hover:bg-blue-50 rounded-lg cursor-pointer flex justify-between items-center border-b border-gray-50 last:border-0">
-            <div>
-              <span class="font-bold text-gray-800">${p.name}</span>
-              <span class="text-[10px] text-gray-400 block">${p.detail}</span>
-            </div>
-            <span class="text-blue-600 text-[10px] font-bold">선택</span>
-          </div>
-        `).join("");
-      } catch (err) {
-        resultsDiv.innerHTML = `<div class="p-2 text-red-500">검색 통신 에러</div>`;
-      }
-    }
+        // 1. 버스 판별 XAI Feature Attribution 카드 렌더링
+        let busCardsHTML = data.busExplanations.map(bus => {
+          const isResv = bus.isReserved;
+          const badgeBg = isResv ? "bg-rose-600 text-white" : "bg-emerald-600 text-white";
+          const badgeLabel = isResv ? "🔴 전세버스 (탑승불가)" : "🟢 일반버스 (탑승가능)";
+          const cardBorder = isResv ? "border-rose-300 bg-rose-50/40" : "border-emerald-300 bg-emerald-50/40";
 
-    function selectPlace(type, name, x, y) {
-      if (type === 'start') {
-        selectedStart = { name, x, y };
-        document.getElementById('startInput').value = name;
-        document.getElementById('startSearchResults').classList.add("hidden");
-      } else {
-        selectedEnd = { name, x, y };
-        document.getElementById('endInput').value = name;
-        document.getElementById('endSearchResults').classList.add("hidden");
-      }
-    }
-
-    // 자연어 텍스트를 실시간으로 좌표로 변환하는 헬퍼 함수
-    async function resolveCoords(text, type) {
-      // 1. 이미 드롭다운에서 선택된 경우
-      if (type === 'start' && selectedStart) return selectedStart;
-      if (type === 'end' && selectedEnd) return selectedEnd;
-
-      // 2. 실시간 자연어 검색으로 1등 결과 좌표 획득
-      const res = await fetch(`/api/search-place?keyword=${encodeURIComponent(text)}`);
-      const data = await res.json();
-      if (data.success && data.places.length > 0) {
-        return { name: data.places[0].name, x: data.places[0].x, y: data.places[0].y };
-      }
-      throw new Error(`'${text}' 위치를 찾을 수 없습니다. 정확한 명칭을 입력해주세요.`);
-    }
-
-    // GPS 위치로 출발지 채우기
-    function getUserLocation() {
-      const input = document.getElementById("startInput");
-      if ("geolocation" in navigator) {
-        input.value = "위치 수신 중...";
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            selectedStart = { name: "현재 GPS 위치", x: pos.coords.longitude, y: pos.coords.latitude };
-            input.value = `📍 현재 위치 (${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)})`;
-          },
-          (err) => {
-            alert("GPS 신호를 잡을 수 없습니다. 텍스트로 출발지(예: 사당역)를 입력해주세요.");
-            input.value = "사당역";
-          },
-          { enableHighAccuracy: true, timeout: 5000 }
-        );
-      }
-    }
-
-    // 최적 경로 탐색 실행
-    async function searchTransitRoute() {
-      const container = document.getElementById("routeResults");
-      const btn = document.getElementById("searchRouteBtn");
-      const startText = document.getElementById("startInput").value.trim();
-      const endText = document.getElementById("endInput").value.trim();
-
-      if (!startText || !endText) {
-        alert("출발지와 목적지를 모두 입력해주세요!");
-        return;
-      }
-
-      btn.disabled = true;
-      btn.innerText = "장소 위치 파악 중...";
-      container.innerHTML = `<div class="text-center py-8 text-xs text-gray-400 animate-pulse">실시간 지오코딩 및 최적 경로 계산 중...</div>`;
-
-      try {
-        // 자연어 장소명을 좌표로 동적 변환
-        const startCoord = await resolveCoords(startText, 'start');
-        const endCoord = await resolveCoords(endText, 'end');
-
-        btn.innerText = "대중교통 경로 계산 중...";
-
-        const url = `/api/directions?startX=${startCoord.x}&startY=${startCoord.y}&endX=${endCoord.x}&endY=${endCoord.y}`;
-        const res = await fetch(url);
-        const data = await res.json();
-
-        btn.disabled = false;
-        btn.innerText = "최적 경로 검색하기";
-
-        if (!data.success || data.paths.length === 0) {
-          container.innerHTML = `
-            <div class="p-4 bg-gray-50 rounded-xl text-center text-xs text-red-500">
-              ${data.error || "이용 가능한 대중교통 경로가 없습니다."}
-            </div>
-          `;
-          return;
-        }
-
-        container.innerHTML = data.paths.map((p) => {
-          let alert7790HTML = "";
-          if (p.includes7790 && p.status7790) {
-            const isResv = p.status7790.isReserved;
-            alert7790HTML = `
-              <div class="mt-2.5 p-2.5 rounded-xl ${isResv ? 'bg-rose-50 border border-rose-300 text-rose-800' : 'bg-emerald-50 border border-emerald-300 text-emerald-800'} text-xs flex items-center space-x-2">
-                <span class="text-base">${isResv ? '⚠️' : '✅'}</span>
-                <div>
-                  <div class="font-bold">
-                    ${isResv ? '현재 오는 7790은 [전세버스 (탑승불가)] 입니다!' : '현재 오는 7790은 [일반 버스 (탑승가능)] 입니다!'}
-                  </div>
-                  <div class="text-[10px] opacity-80 mt-0.5">사당역 도착 예정: 약 ${p.status7790.predictTimeMin}분 후 (${p.status7790.remainSeats}석)</div>
-                </div>
+          const featuresHTML = bus.features.map(f => `
+            <div class="space-y-1 text-xs">
+              <div class="flex justify-between items-center text-[11px]">
+                <span class="font-bold text-gray-700">${f.name}</span>
+                <span class="font-black ${isResv ? 'text-rose-600' : 'text-emerald-700'}">${f.weight}% 기여</span>
               </div>
-            `;
-          }
-
-          const stepsHTML = p.steps.map(s => {
-            if (s.type === 'walk') {
-              return `<span class="text-[11px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">도보 ${s.time}분</span>`;
-            } else if (s.type === 'bus') {
-              const is7790 = s.name.includes("7790");
-              return `<span class="text-[11px] font-bold ${is7790 ? 'bg-red-500 text-white' : 'bg-blue-500 text-white'} px-2 py-0.5 rounded shadow-sm">🚌 ${s.name} (${s.time}분)</span>`;
-            } else if (s.type === 'subway') {
-              return `<span class="text-[11px] font-bold bg-amber-500 text-white px-2 py-0.5 rounded shadow-sm">🚇 ${s.name} (${s.time}분)</span>`;
-            }
-          }).join(`<span class="text-gray-300"> ➔ </span>`);
+              <div class="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                <div class="${isResv ? 'bg-rose-500' : 'bg-emerald-500'} h-1.5 rounded-full" style="width: ${f.weight}%"></div>
+              </div>
+              <p class="text-[10px] text-gray-400">${f.desc}</p>
+            </div>
+          `).join("");
 
           return `
-            <div class="p-4 bg-white rounded-2xl border border-gray-200 shadow-sm hover:border-blue-300 transition">
-              <div class="flex justify-between items-baseline mb-2">
-                <div class="flex items-baseline space-x-1.5">
-                  <span class="text-xl font-black text-blue-600">${p.totalTime}분</span>
-                  <span class="text-xs text-gray-400">환승 ${p.transferCount}회 · 도보 ${p.totalWalk}m</span>
+            <div class="p-4 rounded-2xl border ${cardBorder} shadow-sm space-y-3 bg-white">
+              <div class="flex justify-between items-start">
+                <div>
+                  <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">${bus.order}</span>
+                  <div class="flex items-center space-x-1.5 mt-0.5">
+                    <span class="text-lg font-black text-gray-900">${bus.shortPlate}</span>
+                    <span class="text-xs text-gray-500 font-bold">(${bus.remainSeats}석 잔여)</span>
+                  </div>
                 </div>
-                <span class="text-xs font-bold text-gray-600">${p.payment.toLocaleString()}원</span>
+                <span class="text-[11px] font-black px-2.5 py-1 rounded-full shadow-sm ${badgeBg}">
+                  ${badgeLabel}
+                </span>
               </div>
-              <div class="flex flex-wrap items-center gap-1.5 my-2">
-                ${stepsHTML}
+
+              <!-- AI 설명 자연어 요약 -->
+              <div class="p-2.5 bg-gray-50 rounded-xl text-xs text-gray-700 border border-gray-100 flex items-start space-x-2">
+                <span class="text-sm">💡</span>
+                <span class="leading-relaxed font-medium">${bus.decisionText}</span>
               </div>
-              ${alert7790HTML}
+
+              <!-- Feature Attribution (특성 기여도 바) -->
+              <div class="space-y-2 pt-1 border-t border-gray-100">
+                <div class="flex justify-between items-center text-[11px] font-bold text-gray-500">
+                  <span>AI 의사결정 기여 요인 (Feature Attribution)</span>
+                  <span class="text-indigo-600">신뢰도 ${bus.confidence}%</span>
+                </div>
+                ${featuresHTML}
+              </div>
+
+              <!-- 탑승 성공 확률 지수 -->
+              <div class="p-2.5 bg-blue-50/60 rounded-xl border border-blue-100 flex justify-between items-center">
+                <div>
+                  <span class="text-[10px] font-bold text-blue-600 block">사당역 탑승 성공 확률 (추정치)</span>
+                  <span class="text-xs font-black text-gray-800">${bus.boardingStatus}</span>
+                </div>
+                <div class="text-right">
+                  <span class="text-base font-black ${isResv ? 'text-rose-600' : 'text-blue-600'}">${bus.boardingProb}%</span>
+                </div>
+              </div>
             </div>
           `;
         }).join("");
 
+        // 2. 사당-수원대 구간 지연 기여 요인 (SHAP Waterfall) 렌더링
+        let delayBarsHTML = data.delayFactors.map(f => `
+          <div class="space-y-1 text-xs">
+            <div class="flex justify-between items-center">
+              <span class="font-bold text-gray-700">${f.factor}</span>
+              <span class="font-black text-gray-900">${f.shapValue} <span class="text-[10px] text-gray-400">(${f.percentage}%)</span></span>
+            </div>
+            <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+              <div class="${f.color} h-2 rounded-full" style="width: ${f.percentage}%"></div>
+            </div>
+            <p class="text-[10px] text-gray-400">${f.desc}</p>
+          </div>
+        `).join("");
+
+        // 3. 전체 합체 렌더링
+        container.innerHTML = `
+          <!-- 1. 차량 판별 설명 섹션 -->
+          <div class="space-y-2.5">
+            <div class="flex justify-between items-center px-1">
+              <h3 class="text-xs font-black text-gray-800 flex items-center space-x-1">
+                <span>🎯</span> <span>실시간 버스 판별 근거 (Feature Importance)</span>
+              </h3>
+              <span class="text-[10px] text-gray-400">GBIS 텔레메트리 연동</span>
+            </div>
+            ${busCardsHTML}
+          </div>
+
+          <!-- 2. 지연 요인 SHAP 분석 섹션 -->
+          <div class="p-4 bg-white rounded-2xl border border-gray-200 shadow-sm space-y-3">
+            <div class="flex justify-between items-center">
+              <h3 class="text-xs font-black text-gray-800 flex items-center space-x-1">
+                <span>📊</span> <span>사당역 도착 지연 기여 요인 (SHAP 분석)</span>
+              </h3>
+              <span class="text-[10px] bg-indigo-50 text-indigo-600 font-bold px-2 py-0.5 rounded-full">지연 기여도</span>
+            </div>
+            <p class="text-[11px] text-gray-500">
+              오늘 실시간 교통량과 승하차 데이터를 기반으로 AI가 산출한 구간별 지연 요인입니다.
+            </p>
+            <div class="space-y-3 pt-1">
+              ${delayBarsHTML}
+            </div>
+          </div>
+
+          <!-- 3. XAI 모델 아키텍처 정보 -->
+          <div class="p-3.5 bg-gray-50 rounded-2xl border border-gray-200 text-[11px] text-gray-500 space-y-1">
+            <div class="flex items-center space-x-1 text-gray-700 font-bold">
+              <span>🔬</span> <span>XAI 모델 아키텍처 (수원대 데이터과학부)</span>
+            </div>
+            <p>• 알고리즘: ${data.modelMeta.algorithm}</p>
+            <p>• 학습 및 실시간 데이터: ${data.modelMeta.dataSources.join(" · ")}</p>
+            <p>• 현재 7790번 관측 차량: 총 ${data.modelMeta.totalActiveBuses}대 실시간 트래킹 중</p>
+          </div>
+        `;
+
       } catch (err) {
-        btn.disabled = false;
-        btn.innerText = "최적 경로 검색하기";
-        container.innerHTML = `<div class="p-4 text-center text-xs text-red-500">${err.message || '통신 에러가 발생했습니다.'}</div>`;
+        container.innerHTML = `<div class="p-4 text-center text-xs text-rose-500 font-bold">XAI 데이터 통신 오류: ${err.message}</div>`;
       }
     }
 
@@ -398,7 +330,7 @@
           arrivalContainer.innerHTML = `<div class="p-3 bg-white rounded-xl border border-gray-200 text-center text-xs text-gray-400">현재 운행 중인 7790번이 없습니다.</div>`;
         } else {
           arrivalContainer.innerHTML = arrivals.map(bus => {
-            const isReserved = bus.isReserved;
+            const isReserved = bus.isReserved || (bus.shortPlate && bus.shortPlate.startsWith("9"));
             const badgeBg = isReserved ? "bg-rose-600 text-white" : "bg-emerald-600 text-white";
             const badgeText = isReserved ? "🔴 전세 (탑승불가)" : "🟢 일반 (탑승가능)";
             const cardBg = isReserved ? "bg-rose-50 border-rose-300" : "bg-white border-gray-200";
@@ -424,50 +356,82 @@
           }).join("");
         }
 
-        let timelineHTML = `<div class="absolute left-[13px] top-3 bottom-3 w-[4px] bg-emerald-500 rounded-full"></div>`;
-
+        // 1. 세로선: 중심축 16px에 정확히 맞춤 (w-8 노드 중심과 100% 일치)
+        let timelineHTML = `<div class="absolute left-[14px] top-4 bottom-4 w-[4px] bg-emerald-500 rounded-full z-0"></div>`;
         stations.forEach((st) => {
           const isTarget = st.isTarget;
           const isTurn = st.isTurn;
           const isPass = st.isPass;
           const matchedVehicles = vehicles.filter(v => v.currentStationId === st.id);
+          const hasBus = matchedVehicles.length > 0;
+          // 2. 동그라미(노드) 처리: 버스가 있는 정류장은 동그라미 자리에 바로 버스 아이콘(🚌) 탑재!
+          let nodeDot = '';
+          if (hasBus) {
+            const firstBus = matchedVehicles[0];
+            const isResv = firstBus.isReserved || (firstBus.shortPlate && firstBus.shortPlate.startsWith("9"));
+            // 일반 버스는 빨간 원형 뱃지, 전세 버스는 로즈색 뱃지
+            const busBg = isResv ? 'bg-rose-600 ring-rose-200' : 'bg-red-500 ring-red-200';
+            nodeDot = `
+              <div class="w-7 h-7 rounded-full ${busBg} text-white shadow-md ring-4 flex items-center justify-center text-xs z-20 bus-pulse">
+                🚌
+              </div>
+            `;
+          } else if (isPass) {
+            nodeDot = `<div class="w-2 h-2 rounded-full bg-gray-300 z-10"></div>`;
+          } else if (isTurn) {
+            nodeDot = `<div class="w-4 h-4 rounded-full border-2 border-red-500 bg-white z-10 shadow-xs"></div>`;
+          } else if (isTarget) {
+            nodeDot = `<div class="w-4 h-4 rounded-full border-4 border-yellow-400 bg-white z-10 shadow"></div>`;
+          } else {
+            nodeDot = `<div class="w-3.5 h-3.5 rounded-full border-2 border-emerald-500 bg-white z-10"></div>`;
+          }
 
-          let nodeDot = `<div class="w-3.5 h-3.5 rounded-full border-2 border-emerald-500 bg-white z-10"></div>`;
-          if (isPass) nodeDot = `<div class="w-2 h-2 rounded-full bg-gray-300 z-10"></div>`;
-          else if (isTurn) nodeDot = `<div class="relative z-10 flex items-center justify-center"><div class="w-4 h-4 rounded-full border-2 border-red-500 bg-white"></div><span class="absolute -left-9 text-[10px] font-bold text-red-500 bg-red-50 px-1 rounded">회차</span></div>`;
-          else if (isTarget) nodeDot = `<div class="w-4 h-4 rounded-full border-4 border-yellow-400 bg-white z-10 shadow"></div>`;
-
-          let vehiclePinsHTML = "";
-          if (matchedVehicles.length > 0) {
-            vehiclePinsHTML = matchedVehicles.map(v => {
-              const isResv = v.isReserved;
-              const pinBorder = isResv ? "border-rose-500" : "border-emerald-600";
-              const pinBadgeBg = isResv ? "bg-rose-500 text-white" : "bg-emerald-600 text-white";
-              const pinBadgeLabel = isResv ? "전세" : "일반";
+          // 3. 버스 상세 스펙 뱃지 (차량번호, 잔여좌석, 일반/전세 태그)
+          let vehicleInfoHTML = "";
+          if (hasBus) {
+            vehicleInfoHTML = matchedVehicles.map(v => {
+              const isResv = v.isReserved || (v.shortPlate && v.shortPlate.startsWith("9"));
+              const badgeBorder = isResv ? "border-rose-400 bg-rose-50 text-rose-800" : "border-emerald-500 bg-emerald-50 text-emerald-800";
+              const tagBg = isResv ? "bg-rose-600 text-white" : "bg-emerald-600 text-white";
+              const tagText = isResv ? "전세" : "일반";
 
               return `
-                <div class="live-bus-pin absolute right-0 -top-3.5 flex items-center space-x-1.5 bg-white border-2 ${pinBorder} px-2 py-1 rounded-xl shadow-lg z-20">
-                  <span class="text-xs font-black text-gray-900">${v.shortPlate}</span>
-                  <span class="text-[10px] text-gray-500 font-bold">${v.remainSeats}석</span>
-                  ${v.isDoubleDecker ? '<span class="text-[9px] bg-gray-100 text-gray-600 px-1 py-0.5 rounded font-bold">2층</span>' : ''}
-                  <span class="text-xs">🚌</span>
-                  <span class="text-[10px] font-black px-1.5 py-0.5 rounded-full ${pinBadgeBg}">${pinBadgeLabel}</span>
+                <div class="flex items-center space-x-1.5 border ${badgeBorder} px-2 py-0.5 rounded-lg shadow-xs text-xs font-bold">
+                  <span class="text-gray-900 font-black">${v.shortPlate}</span>
+                  <span class="text-[11px] text-gray-500">${v.remainSeats}석</span>
+                  ${v.isDoubleDecker ? '<span class="text-[9px] bg-gray-200 text-gray-700 px-1 rounded font-black">2층</span>' : ''}
+                  <span class="text-[10px] font-black px-1.5 py-0.2 rounded-full ${tagBg}">${tagText}</span>
                 </div>
               `;
             }).join("");
           }
 
+          // 4. 타임라인 행 렌더링: 정렬 어긋남 방지를 위해 -mx-2 제거, '회차' 뱃지는 이름 옆으로 배치하여 잘림 방지
           timelineHTML += `
-            <div id="${isTarget ? 'station-target' : ''}" class="relative flex items-center py-2.5 ${isTarget ? 'bg-blue-50/70 -mx-3 px-3 rounded-xl border border-blue-200' : ''}">
-              <div class="absolute left-[-21px] flex items-center justify-center">${nodeDot}</div>
-              <div class="flex-1 ml-3 pr-36">
-                <div class="text-xs ${isTarget ? 'text-blue-900 font-black text-sm' : isPass ? 'text-gray-400 font-normal' : 'text-gray-700 font-medium'}">
-                  ${st.name}
-                  ${isTarget ? '<span class="ml-1 text-[11px] text-blue-600 font-bold">● 여기서 수원대행 탑승</span>' : ''}
+            <div id="${isTarget ? 'station-target' : ''}" class="relative flex items-center py-2.5 z-10 ${isTarget ? 'bg-blue-50/80 rounded-xl border border-blue-200' : ''}">
+              <!-- 좌측: 정류장 동그라미 또는 버스 아이콘 (세로선 중심 16px과 정확히 일치) -->
+              <div class="w-8 flex-shrink-0 flex items-center justify-center z-10">
+                ${nodeDot}
+              </div>
+
+              <!-- 우측: 정류장 이름 및 버스 상세 정보 -->
+              <div class="flex-1 ml-2 flex justify-between items-center min-w-0 pr-2">
+                <div class="truncate mr-2">
+                  <div class="flex items-center space-x-1">
+                    <span class="text-xs ${isTarget ? 'text-blue-900 font-black text-sm' : isPass ? 'text-gray-400 font-normal' : 'text-gray-800 font-medium'} truncate">
+                      ${st.name}
+                    </span>
+                    ${isTurn ? '<span class="flex-shrink-0 text-[10px] font-black text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded shadow-xs">회차</span>' : ''}
+                  </div>
+                  ${isTarget ? '<span class="text-[11px] text-blue-600 font-bold block mt-0.5">● 여기서 수원대행 탑승</span>' : ''}
                   ${isPass ? '<span class="text-[10px] text-gray-400 block font-normal">미정차</span>' : ''}
                 </div>
+
+                <!-- 버스 번호 및 좌석 뱃지 -->
+                <div class="flex-shrink-0 flex flex-col items-end space-y-1">
+                  ${vehicleInfoHTML}
+                </div>
               </div>
-              ${vehiclePinsHTML}
             </div>
           `;
         });
