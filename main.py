@@ -483,8 +483,15 @@ def get_crowd_summary(station_id="119000302"):
     weekday = now_dt.weekday()  # 0:월 ~ 4:금, 5:토, 6:일
 
     if is_down:
-        is_peak = (weekday < 5) and (7.5 <= time_float <= (10.0 + 10.0/60.0))
-        peak_name = "등교 피크 (07:30~10:10)"
+        is_morning_peak = (weekday < 5) and (7.5 <= time_float <= (10.0 + 10.0/60.0))
+        is_evening_peak = (weekday < 5) and (17.0 <= time_float <= 19.5)
+        is_peak = is_morning_peak or is_evening_peak
+        if is_morning_peak:
+            peak_name = "등교 피크 (07:30~10:10)"
+        elif is_evening_peak:
+            peak_name = "퇴근 피크 (17:00~19:30)"
+        else:
+            peak_name = ""
     else:
         is_peak = (weekday < 5) and ((15.0 + 25.0/60.0) <= time_float <= (17.0 + 30.0/60.0))
         peak_name = "하교 피크 (15:25~17:30)"
@@ -533,6 +540,7 @@ def get_crowd_summary(station_id="119000302"):
             "lastReportMinutesAgo": last_min,
             "isPeak": is_peak,
             "peakName": peak_name,
+            "isMorningRush": (is_peak and is_down),
             "isAfternoonRush": (is_peak and not is_down),
             "isSticky": is_sticky,
             "stickyDecayFactor": sticky_decay_factor
@@ -551,6 +559,7 @@ def get_crowd_summary(station_id="119000302"):
             "lastReportMinutesAgo": None,
             "isPeak": is_peak,
             "peakName": peak_name,
+            "isMorningRush": (is_peak and is_down),
             "isAfternoonRush": (is_peak and not is_down),
             "isSticky": False,
             "stickyDecayFactor": 1.0
@@ -578,37 +587,37 @@ def estimate_sadang_waiters_by_time():
     time_float = hour + minute / 60.0
 
     if 7.5 <= time_float < (7 + 50/60.0):  # 07:30 ~ 07:50 (1교시 등교열 급증 구간)
-        base = 34
+        base = 48
         desc = f"{day_name}요일 1교시 등교열 급증 (07:30~07:50)"
     elif (7 + 50/60.0) <= time_float < (8 + 25/60.0):  # 07:50 ~ 08:25 (9시 1교시 등교 최대 극피크)
-        base = 38
+        base = 66
         desc = f"{day_name}요일 1교시 등교 극피크 (07:50~08:25)"
     elif (8 + 25/60.0) <= time_float < (8 + 50/60.0):  # 08:25 ~ 08:50 (8:30 기점 1교시 마무리 및 대기열 감소세)
-        base = 26
+        base = 36
         desc = f"{day_name}요일 1교시 승차 마무리·대기열 감소세 (08:25~08:50)"
-    elif (8 + 50/60.0) <= time_float < (9 + 35/60.0):  # 08:50 ~ 09:35 (10:30 2교시 등교 완만 피크)
-        base = 20
+    elif (8 + 50/60.0) <= time_float < (9 + 35/60.0):  # 08:50 ~ 09:35 (10:30 2교시 등교 피크)
+        base = 48
         desc = f"{day_name}요일 10:30 2교시 등교 피크 (08:50~09:35)"
     elif (9 + 35/60.0) <= time_float < (10 + 10/60.0):  # 09:35 ~ 10:10 (2교시 승차 마무리 및 완화)
-        base = 14
+        base = 25
         desc = f"{day_name}요일 2교시 승차 마무리 (09:35~10:10)"
     elif (10 + 10/60.0) <= time_float < 12.0:  # 10:10 ~ 12:00 (오전 분산 통학)
-        base = 12
+        base = 15
         desc = "오전 분산 통학 시간대"
     elif 12.0 <= time_float < 13.5:  # 12:00 ~ 13:30 (오후 수업 등교 & 점심)
-        base = 9
+        base = 10
         desc = "3교시 점심 분산 시간대"
     elif 13.5 <= time_float < 16.5:  # 13:30 ~ 16:30 (낮 한산 시간대)
-        base = 7
+        base = 8
         desc = "낮 시간대 통학 한산"
     elif 16.5 <= time_float < 19.5:  # 16:30 ~ 19:30 (퇴근길 봉담/수원대 귀가)
-        base = 20
+        base = 36
         desc = "퇴근길 봉담 방면 승차 집중"
     elif 19.5 <= time_float < 22.0:  # 19:30 ~ 22:00 (야간 귀가)
-        base = 11
+        base = 14
         desc = "야간 귀가 시간대"
     else:  # 심야/새벽
-        base = 4
+        base = 5
         desc = "심야/새벽 한산 시간대"
 
     est = int(round(base * day_multiplier))
@@ -794,6 +803,7 @@ def get_xai_analysis(station_id: str = Query("119000302")):
 
     profile = STATION_XAI_PROFILES.get(station_id, STATION_XAI_PROFILES["119000302"])
     is_down = (profile["dir"] == "DOWN")
+    is_morning_rush = crowd_info.get("isMorningRush", False)
     is_afternoon_rush = crowd_info.get("isAfternoonRush", False)
 
     # 실시간 GBIS 도로교통 소통 속도 및 기상 지연 요인 산출
@@ -923,22 +933,24 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                 decay_fac = crowd_info.get("stickyDecayFactor", 1.0)
 
                 if crowd_status == "smooth":
-                    est_waiters = 8
+                    est_waiters = 10
                     delta = 3
                     tft_crowd_weight = 40
                     crowd_desc = "학우 실시간 제보: 대기열이 짧아 즉시 착석 유력"
                     is_from_report = True
                 elif crowd_status == "moderate":
-                    est_waiters = max(12, int(round(20 * decay_fac)))
+                    base_mod = 38 if is_morning_rush else 20
+                    est_waiters = max(15, int(round(base_mod * decay_fac)))
                     delta = 4
                     tft_crowd_weight = 42
                     crowd_desc = "학우 실시간 제보: 보통 수준 대기열로 줄 순번에 따라 착석 가능" if not is_sticky else "직전 제보 잔류: 버스 승차 대기열 반영 중"
                     is_from_report = True
                 elif crowd_status == "crowded":
-                    est_waiters = max(22, int(round(40 * decay_fac)))
+                    base_crowd = 72 if is_morning_rush else 45
+                    est_waiters = max(28, int(round(base_crowd * decay_fac)))
                     delta = 6
-                    tft_crowd_weight = 48
-                    crowd_desc = "학우 실시간 제보: 대기 인원이 많아 다음 차 대기 가능성 고려" if not is_sticky else "직전 혼잡 제보 잔류: 버스 승차 미완료로 대기 인원 지속"
+                    tft_crowd_weight = 50
+                    crowd_desc = "학우 실시간 제보: 대기 인원 포화로 다음 차 대기 가능성 높음" if not is_sticky else "직전 혼잡 제보 잔류: 버스 승차 미완료로 대기 인원 지속"
                     is_from_report = True
                 else:
                     # ⭐ 실시간 제보 부재 시: 수원대 통학 시간표 및 요일별 사전 통계 모델 자동 가동
@@ -948,6 +960,17 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                     crowd_desc = f"통학 통계 모델: [{time_slot_desc}] 기준 대기열 분석"
                     is_from_report = False
 
+                # 2번째 버스일 경우: 1번째 버스 승차 후 잔여 대기열 이월 및 후속 유입 반영
+                if idx == 2 and len(target_list) > 1:
+                    first_bus = target_list[0]
+                    first_cap = 0 if first_bus.get("isReserved") else (71 if first_bus.get("isDoubleDecker") else 45)
+                    leftover_waiters = max(0, est_waiters - first_cap)
+                    p_curr = b.get("predictTimeMin") or 20
+                    p_first = first_bus.get("predictTimeMin") or 10
+                    interval_min = max(5, p_curr - p_first)
+                    arrival_rate = 1.8 if is_morning_rush else 0.6
+                    est_waiters = leftover_waiters + int(round(interval_min * arrival_rate))
+
                 # 사당역 진입 버스(빈 차 45석 또는 71석)와 대기열 간 착석 성공률 계산
                 seat_diff = eval_seats - est_waiters
 
@@ -956,15 +979,15 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                     boarding_status = "착석 매우 확실 (좌석 여유)"
                     prob_color = "emerald"
                 elif seat_diff >= 3:
-                    boarding_prob = 88
+                    boarding_prob = 80
                     boarding_status = "착석 유력 (순번 안정)"
                     prob_color = "emerald"
                 elif seat_diff >= -5:
-                    boarding_prob = 68
+                    boarding_prob = 58
                     boarding_status = "착석 경합 (앞쪽 순번 유력)"
                     prob_color = "amber"
                 else:
-                    boarding_prob = 38
+                    boarding_prob = 32
                     boarding_status = "착석 주의 (다음 차 대기 유력)"
                     prob_color = "rose"
 
@@ -982,8 +1005,10 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                 else:
                     if seat_diff < -5:
                         decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하나, 현재 [{time_slot_desc}]로 대기 인원이 많아 1층 버스는 만석으로 다음 차 대기 가능성이 높습니다."
+                    elif is_double and est_waiters >= 55:
+                        decision_text = f"현재 [{time_slot_desc}]로 대기열이 길게 형성되어 있으며, 2층 버스(71석)로 다수 탑승 가능하나 뒷 순번은 착석 경합이 발생할 수 있습니다."
                     elif is_double and est_waiters >= 30:
-                        decision_text = f"현재 [{time_slot_desc}]로 승차 대기열이 형성되어 있으나, 이번 도착 차량이 2층 버스(71석)이므로 대기 인원 전원 여유로운 착석 탑승이 유력합니다!"
+                        decision_text = f"현재 [{time_slot_desc}]로 승차 대기열이 형성되어 있으나, 이번 도착 차량이 2층 버스(71석)이므로 대기 인원 대부분 여유로운 착석 탑승이 유력합니다!"
                     elif seat_diff >= 15:
                         decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하며, 현재 [{time_slot_desc}] 기준 여유로운 착석 탑승이 유력합니다."
                     else:
