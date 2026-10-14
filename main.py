@@ -115,6 +115,7 @@ def fetch_full_route_stations():
 def startup_event():
     global CACHED_STATIONS
     CACHED_STATIONS = fetch_full_route_stations()
+    load_crowd_data_from_disk()
 
 
 @app.get("/")
@@ -284,16 +285,50 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
     CACHE_BUS_ARRIVALS[station_id] = {"data": res_data, "timestamp": now}
     return res_data
 
-# ⭐ 정류장별 학우 실시간 제보 저장소 및 IP 도배 방지 쿨다운 캐시
+# ⭐ 정류장별 학우 실시간 제보 영구 보존 및 IP 도배 방지 쿨다운
+CROWD_DATA_FILE = "crowd_reports_cache.json"
 CROWD_REPORTS_BY_STATION = {}
 CROWD_REPORT_IP_COOLDOWN = {}  # {ip: timestamp}
+
+def save_crowd_data_to_disk():
+    try:
+        now = time.time()
+        clean_reports = {}
+        for st_id, r_list in CROWD_REPORTS_BY_STATION.items():
+            valid = [r for r in r_list if now - r["time"] < 300]
+            if valid:
+                clean_reports[st_id] = valid
+        clean_ips = {ip: t for ip, t in CROWD_REPORT_IP_COOLDOWN.items() if now - t < 300}
+        with open(CROWD_DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump({"reports": clean_reports, "ips": clean_ips}, f)
+    except Exception as e:
+        print(f"제보 데이터 디스크 저장 오류: {e}")
+
+def load_crowd_data_from_disk():
+    global CROWD_REPORTS_BY_STATION, CROWD_REPORT_IP_COOLDOWN
+    try:
+        if os.path.exists(CROWD_DATA_FILE):
+            with open(CROWD_DATA_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            now = time.time()
+            clean_reports = {}
+            for st_id, r_list in data.get("reports", {}).items():
+                valid = [r for r in r_list if now - r["time"] < 300]
+                if valid:
+                    clean_reports[st_id] = valid
+            CROWD_REPORTS_BY_STATION = clean_reports
+            CROWD_REPORT_IP_COOLDOWN = {ip: t for ip, t in data.get("ips", {}).items() if now - t < 300}
+            print(f"[OK] 제보 데이터 {sum(len(v) for v in clean_reports.values())}건 디스크 복원 완료!")
+    except Exception as e:
+        print(f"제보 데이터 디스크 복원 오류: {e}")
+
 @app.post("/api/crowd-report")
 def report_crowd(
     request: Request,
     status: str = Query(..., description="여유(smooth), 보통(moderate), 포화(crowded)"),
     station_id: str = Query("119000302", description="제보 정류장 ID")
 ):
-    """정류장별 학우들의 1초 원터치 줄 상태 제보 저장 API (5분 쿨다운 및 도배 방지)"""
+    """정류장별 학우들의 1초 원터치 줄 상태 제보 저장 API (5분 쿨다운 및 도배 방지, 디스크 영구보존)"""
     import time
     now = time.time()
     
@@ -315,6 +350,14 @@ def report_crowd(
     CROWD_REPORTS_BY_STATION[station_id] = [r for r in CROWD_REPORTS_BY_STATION[station_id] if now - r["time"] < 300]
     CROWD_REPORTS_BY_STATION[station_id].append({"status": status, "time": now})
     CROWD_REPORT_IP_COOLDOWN[client_ip] = now
+
+    # ⭐ 디스크 영구 저장 (서버 재부팅/재배포 시에도 제보 보존)
+    save_crowd_data_to_disk()
+
+    # ⭐ 제보 등록 즉시 모든 캐시 무효화 (0.001초 즉시 반영)
+    global CACHE_BUS_ARRIVALS, CACHE_XAI_ANALYSIS
+    CACHE_BUS_ARRIVALS.clear()
+    CACHE_XAI_ANALYSIS.clear()
     
     return {"success": True, "message": "학우님의 제보가 실시간 XAI 모델에 즉시 반영되었습니다!"}
 
