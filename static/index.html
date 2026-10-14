@@ -855,9 +855,10 @@
 
         timelineContainer.innerHTML = timelineHTML;
 
-        // ⭐ 새 정류소 렌더링 완료 후 해당 정류장 위치로 자동 스크롤
+        // ⭐ 새 정류소 렌더링 완료 후 해당 정류장 위치로 자동 스크롤 (초기 로딩 레이아웃 지연 완벽 보정)
         if (autoScroll) {
-          setTimeout(scrollToTarget, 60);
+          setTimeout(scrollToTarget, 100);
+          setTimeout(scrollToTarget, 400);
         }
 
       } catch (err) {

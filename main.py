@@ -195,6 +195,8 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
                 plate_list = v.get("busNo", [])
                 plate = plate_list[0] if plate_list else ""
                 short_plate = plate[-4:] if len(plate) >= 4 else plate
+                # API reservation 플래그가 Y이거나, 9천번대 임차 전세차량인 경우
+                is_reserved = (v.get("reservation") == "Y") or (short_plate.startswith("9"))
                 # 카카오맵/GBIS 기준 실제 버스가 정차/출발한 현재 정류장(fromStationId)을 우선 매핑
                 target_station = str(v.get("fromStationId") or v.get("toStationId") or "")
                 
