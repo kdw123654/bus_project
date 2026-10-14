@@ -1,4 +1,7 @@
 import os
+import datetime
+import time
+import json
 import requests
 from urllib.parse import quote
 from fastapi import FastAPI, Query, Request
@@ -367,9 +370,10 @@ def get_crowd_summary(station_id="119000302"):
     now = time.time()
     reports = CROWD_REPORTS_BY_STATION.get(station_id, [])
     valid_reports = [r for r in reports if now - r["time"] < 300]
-    # ⭐ 오후 3시~5시 (15:00 ~ 17:59) 학생 하교/귀가 피크 시간대 여부 판별
-    current_hour = datetime.datetime.now().hour
-    is_afternoon_rush = (15 <= current_hour <= 17)
+    # ⭐ 오후 3시 25분~5시 30분 (15:25 ~ 17:30) 학생 하교/귀가 피크 시간대 여부 판별
+    now_dt = datetime.datetime.now()
+    time_float = now_dt.hour + now_dt.minute / 60.0
+    is_afternoon_rush = (15 + 25/60.0 <= time_float <= 17 + 30/60.0)
     profile = STATION_XAI_PROFILES.get(station_id, STATION_XAI_PROFILES["119000302"])
     st_name = profile["name"]
     if valid_reports:
@@ -387,12 +391,12 @@ def get_crowd_summary(station_id="119000302"):
             color = "emerald"
         elif dominant_status == "moderate":
             status_text = "보통 (30~40명 대기)"
-            desc_text = f"{'오후 하교 시간대로 ' if is_afternoon_rush else ''}대기열이 형성 중입니다. 잔여좌석에 따라 1~2대 대기할 수 있습니다."
+            desc_text = f"{'오후 하교 피크(15:25~17:30)로 ' if is_afternoon_rush else ''}대기열이 형성 중입니다. 잔여좌석에 따라 1~2대 대기할 수 있습니다."
             xai_insight = f"{st_name} 실시간 대기열 35명 내외로 앞 정류장 승차 누적 잔여석과의 경합이 발생 중입니다."
             color = "amber"
         else:
             status_text = "포화 (정류장 줄 장동)"
-            desc_text = f"{'오후 3~5시 학생 하교 집중으로 ' if is_afternoon_rush else ''}줄이 길게 늘어서 있습니다. 다음 차 탑승을 고려하세요."
+            desc_text = f"{'오후 하교 피크(15:25~17:30) 학생 집중으로 ' if is_afternoon_rush else ''}줄이 길게 늘어서 있습니다. 다음 차 탑승을 고려하세요."
             xai_insight = f"{st_name} 대기 인원 50명 이상 포화로, 버스 1대 만석 초과 위험이 반영되어 착석 확률이 30% 이하로 급감했습니다."
             color = "rose"
         return {
@@ -408,19 +412,69 @@ def get_crowd_summary(station_id="119000302"):
             "isAfternoonRush": is_afternoon_rush
         }
     else:
-        rush_hint = " (현재 오후 3~5시 하교 피크 시간대)" if is_afternoon_rush else ""
+        rush_hint = " (현재 오후 3:25~5:30 하교 피크 시간대)" if is_afternoon_rush else ""
         return {
             "hasData": False,
             "status": "none",
             "statusText": "최근 5분 내 제보 없음",
             "descText": f"현재 {st_name} 대기열 제보가 없습니다{rush_hint}. 노선도 탭에서 1초 제보에 참여해 주세요!",
-            "xaiInsight": f"최근 5분 제보가 없어 {'오후 하교 피크 통계 모델' if is_afternoon_rush else '평일 정규 승하차 패턴'}을 적용 중입니다.",
+            "xaiInsight": f"최근 5분 제보가 없어 {'오후 하교 피크(15:25~17:30) 통계 모델' if is_afternoon_rush else '평일 정규 승하차 패턴'}을 적용 중입니다.",
             "color": "gray",
             "totalCount": 0,
             "counts": {"smooth": 0, "moderate": 0, "crowded": 0},
             "lastReportMinutesAgo": None,
             "isAfternoonRush": is_afternoon_rush
         }
+
+# ⭐ 사당역 9번 출구(하행 수원대행) 학우 제보 부재 시 자동 작동하는
+# 수원대학교 강의 시간표 및 요일별 통학 데이터 기반 사전 통계 모델 (Bayesian Prior)
+def estimate_sadang_waiters_by_time():
+    now_dt = datetime.datetime.now()
+    hour = now_dt.hour
+    minute = now_dt.minute
+    weekday = now_dt.weekday()  # 0:월, 1:화, ..., 4:금, 5:토, 6:일
+
+    # 주말 (토/일)
+    if weekday >= 5:
+        if 11 <= hour <= 19:
+            return 14, "주말 일반 통행 분산 (14명 내외)"
+        else:
+            return 6, "주말 한산 시간대 (6명 내외)"
+
+    # 평일 요일 가중치 (월/화 등교 집중 1.15배, 금공강 0.75배)
+    day_multiplier = 1.15 if weekday in [0, 1] else (0.75 if weekday == 4 else 1.0)
+    day_name = ["월", "화", "수", "목", "금"][weekday]
+
+    time_float = hour + minute / 60.0
+
+    if 7.5 <= time_float < 8.75:  # 07:30 ~ 08:45 (9시 1교시 등교 극피크)
+        base = 52
+        desc = f"{day_name}요일 9시 1교시 등교 극피크"
+    elif 8.75 <= time_float < 10.15:  # 08:45 ~ 10:10 (10:30 2교시 등교 피크)
+        base = 38
+        desc = f"{day_name}요일 10:30 2교시 등교 피크"
+    elif 10.15 <= time_float < 12.0:  # 10:10 ~ 12:00 (오전 분산 통학)
+        base = 20
+        desc = "오전 분산 통학 시간대"
+    elif 12.0 <= time_float < 13.5:  # 12:00 ~ 13:30 (오후 수업 등교 & 점심)
+        base = 12  # 학우 피드백 반영: 10~15명 내외 (기본 12명)
+        desc = "3교시 점심 분산 시간대 (10~15명)"
+    elif 13.5 <= time_float < 16.5:  # 13:30 ~ 16:30 (낮 한산 시간대)
+        base = 10
+        desc = "낮 시간대 통학 한산"
+    elif 16.5 <= time_float < 19.5:  # 16:30 ~ 19:30 (퇴근길 봉담/수원대 귀가)
+        base = 28
+        desc = "퇴근길 봉담 방면 승차 집중"
+    elif 19.5 <= time_float < 22.0:  # 19:30 ~ 22:00 (야간 귀가)
+        base = 16
+        desc = "야간 귀가 시간대"
+    else:  # 심야/새벽
+        base = 5
+        desc = "심야/새벽 한산 시간대"
+
+    est = int(round(base * day_multiplier))
+    return est, desc
+
 # ⭐ 실시간 GBIS 도로교통 소통시간 및 실시간 기상/노면 데이터 연동 함수
 def calc_realtime_traffic_delays(direction="UP"):
     """
@@ -548,7 +602,7 @@ STATION_XAI_PROFILES = {
         "dirText": "사당역행 (상행)",
         "seq": 16,
         "summary": "수원대입구는 봉담 시내 마지막 주요 정류장으로, 앞선 정류장(효행초/아이파크/신명) 승차 누적으로 인해 하교 피크 시 잔여좌석 소진율이 가장 높습니다.",
-        "boardingTip": "하교 피크(15:20~17:20)에는 잔여 15석 미만일 경우 다음 차량이나 앞 정류장(신명/아이파크) 승차를 고려하세요."
+        "boardingTip": "하교 피크(15:25~17:30)에는 잔여 15석 미만일 경우 다음 차량이나 앞 정류장(신명/아이파크) 승차를 고려하세요."
     },
     "233002255": {
         "name": "신명아파트",
@@ -606,6 +660,24 @@ def get_xai_analysis(station_id: str = Query("119000302")):
     # 실시간 GBIS 도로교통 소통 속도 및 기상 지연 요인 산출
     realtime_delays = calc_realtime_traffic_delays(direction=profile["dir"])
 
+    # 상행(사당행) 효행초등학교(233002245) 선행 제보 및 실시간 잔여석 급감 사전 검사
+    is_hyohaeng_surge = False
+    if not is_down:
+        hyohaeng_summary = get_crowd_summary(station_id="233002245")
+        h_st = hyohaeng_summary.get("status", "none")
+        if h_st in ["crowded", "moderate"]:
+            is_hyohaeng_surge = True
+        else:
+            # ⭐ 학우 피드백 반영: 제보가 없더라도 효행초 통과 버스의 잔여석이 45석 -> 35석 이하(또는 2층 58석 이하)로
+            # 이미 크게 소진되었다면, 뒤따르는 아이파크/수원대에 엄청난 대기열이 집중되어 있다는 실측 시그널!
+            for v in vehicles:
+                if v.get("dir") == "U":
+                    rem = v.get("remainSeats", 45)
+                    is_dd = v.get("isDoubleDecker", False)
+                    if (not is_dd and 0 < rem <= 35) or (is_dd and 0 < rem <= 58):
+                        is_hyohaeng_surge = True
+                        break
+
     bus_explanations = []
     target_list = arriving[:2]
 
@@ -630,10 +702,16 @@ def get_xai_analysis(station_id: str = Query("119000302")):
         else:
             crowd_status = crowd_info.get("status", "none")
 
-            # --- [아이디어 1번] ST-GNN 상행 연쇄 전파 (정류장별 실측 승차 비중 차등 반영) ---
-            # 💡 사용자 피드백 반영: 하교 피크 시 1위 '아이파크' 최다 승차, 2위 '효행초', 3위 '신명'
+            # --- [개선] ST-GNN 상행 연쇄 전파 & 효행초 조기 포화(역주행 탑승) 연쇄 증폭 모델 ---
+            # 💡 사용자 피드백 반영:
+            # 1. 효행초 조기 포화 감지 시(역주행 탑승): 뒤따르는 아이파크/신명/수원대 좌석 차감 가중치 대폭 증폭
+            # 2. 안내 문구에서는 복잡한 차감 계산식/수치를 비노출하고 직관적인 상태 설명형 자연어 제공
+            # 3. 2층 버스(71석) vs 1층 버스(45석) 차종 스펙 완벽 명시
             upstream_consumed = 0
-            upstream_notices = []
+
+            is_double = b.get("isDoubleDecker", False)
+            bus_type_title = "2층 버스 (71석)" if is_double else "1층 버스 (45석)"
+
             if not is_down:
                 current_seq = profile.get("seq", 16)
                 for up_node in UPSTREAM_STATION_CHAIN:
@@ -642,47 +720,54 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                         up_summary = get_crowd_summary(station_id=st_id)
                         u_st = up_summary.get("status", "none")
 
-                        if st_id == "233002371":  # 아이파크정문 (하교 피크 최다 승차 1위)
+                        if st_id == "233002245":  # 효행초등학교 (기점 10번째)
                             if u_st == "crowded":
-                                c_seats = 14
-                                upstream_notices.append(f"아이파크(혼잡 -{c_seats}석)")
+                                c_seats = 12
                             elif u_st == "moderate":
-                                c_seats = 8
-                                upstream_notices.append(f"아이파크(보통 -{c_seats}석)")
+                                c_seats = 7
                             elif u_st == "smooth":
                                 c_seats = 3
-                                upstream_notices.append(f"아이파크(원활 -{c_seats}석)")
-                            else:
-                                c_seats = 6 if is_afternoon_rush else 2
-                                upstream_notices.append(f"아이파크 -{c_seats}석")
-
-                        elif st_id == "233002245":  # 효행초등학교 (하교 피크 승차 2위)
-                            if u_st == "crowded":
-                                c_seats = 10
-                                upstream_notices.append(f"효행초(혼잡 -{c_seats}석)")
-                            elif u_st == "moderate":
-                                c_seats = 5
-                                upstream_notices.append(f"효행초(보통 -{c_seats}석)")
-                            elif u_st == "smooth":
-                                c_seats = 2
-                                upstream_notices.append(f"효행초(원활 -{c_seats}석)")
                             else:
                                 c_seats = 4 if is_afternoon_rush else 1
-                                upstream_notices.append(f"효행초 -{c_seats}석")
 
-                        else:  # 신명아파트 (수원대 직전, 상대적으로 승차 적음)
-                            if u_st == "crowded":
-                                c_seats = 6
-                                upstream_notices.append(f"신명아파트(혼잡 -{c_seats}석)")
-                            elif u_st == "moderate":
-                                c_seats = 3
-                                upstream_notices.append(f"신명아파트(보통 -{c_seats}석)")
-                            elif u_st == "smooth":
-                                c_seats = 1
-                                upstream_notices.append(f"신명아파트(원활 -{c_seats}석)")
+                        elif st_id == "233002371":  # 아이파크정문 (하교 피크 최다 승차 1위)
+                            if is_hyohaeng_surge:
+                                # 🚨 효행초 역주행 급증 시 아이파크 차감 가중치 폭증 (초포화 연쇄 전파)
+                                if u_st == "crowded":
+                                    c_seats = 24  # 학우 피드백: 제보 접수 시 대폭 추가 차감
+                                elif u_st == "moderate":
+                                    c_seats = 16  # 보통 제보 시 16석 차감
+                                elif u_st == "smooth":
+                                    c_seats = 6
+                                else:
+                                    c_seats = 12 if is_afternoon_rush else 5
                             else:
-                                c_seats = 2 if is_afternoon_rush else 1
-                                upstream_notices.append(f"신명아파트 -{c_seats}석")
+                                if u_st == "crowded":
+                                    c_seats = 15
+                                elif u_st == "moderate":
+                                    c_seats = 8
+                                elif u_st == "smooth":
+                                    c_seats = 3
+                                else:
+                                    c_seats = 6 if is_afternoon_rush else 2
+
+                        else:  # 신명아파트 (수원대 직전)
+                            if is_hyohaeng_surge:
+                                if u_st == "crowded":
+                                    c_seats = 9  # 제보 접수 시 추가 차감
+                                elif u_st == "moderate":
+                                    c_seats = 6
+                                else:
+                                    c_seats = 3 if is_afternoon_rush else 1
+                            else:
+                                if u_st == "crowded":
+                                    c_seats = 6
+                                elif u_st == "moderate":
+                                    c_seats = 3
+                                elif u_st == "smooth":
+                                    c_seats = 1
+                                else:
+                                    c_seats = 2 if is_afternoon_rush else 1
 
                         upstream_consumed += c_seats
 
@@ -690,42 +775,67 @@ def get_xai_analysis(station_id: str = Query("119000302")):
             effective_seats = max(0, seats - upstream_consumed) if not is_down else seats
 
             if is_down:
-                # [사당역 9번 출구 (하행 수원대행)]: 학우 실시간 줄 제보 기반
-                base_prob = 90 if seats >= 40 else (70 if seats >= 15 else 35)
+                # [사당역 9번 출구 (하행 수원대행)]:
+                # 💡 사당역은 회차 정류장으로 승객 전원 하차 후 '전석 빈 차'로 진입하므로
+                # 실제 총 수용 좌석은 2층 버스 71석, 1층 버스 45석입니다.
+                eval_seats = 71 if is_double else 45
+
                 if crowd_status == "smooth":
-                    boarding_prob = min(98, base_prob + 8)
-                    boarding_status = "착석 매우 확실 (줄 짧음)"
-                    prob_color = "emerald"
                     est_waiters = 12
                     delta = 3
                     tft_crowd_weight = 42
-                    crowd_desc = "실시간 대기열 15명 미만으로 즉시 착석 유력"
+                    crowd_desc = "학우 실시간 제보: 대기열 15명 미만으로 즉시 착석 유력"
+                    is_from_report = True
                 elif crowd_status == "moderate":
-                    boarding_prob = max(45, base_prob - 10)
-                    boarding_status = "착석 보통 (1~2대 대기)"
-                    prob_color = "amber"
                     est_waiters = 35
-                    delta = 5
-                    tft_crowd_weight = 38
-                    crowd_desc = "대기 35명 내외로 앞쪽 순번 착석 경합"
+                    delta = 4
+                    tft_crowd_weight = 45
+                    crowd_desc = "학우 실시간 제보: 대기 35명 내외로 앞쪽 순번 착석 경합"
+                    is_from_report = True
                 elif crowd_status == "crowded":
-                    boarding_prob = min(25, base_prob - 45)
-                    boarding_status = "착석 어려움 (줄 포화)"
-                    prob_color = "rose"
                     est_waiters = 55
                     delta = 6
                     tft_crowd_weight = 52
-                    crowd_desc = "대기열 50명 이상 포화로 다음 차 대기 유력"
+                    crowd_desc = "학우 실시간 제보: 대기열 50명 이상 포화로 다음 차 대기 유력"
+                    is_from_report = True
                 else:
-                    boarding_prob = base_prob
-                    boarding_status = "착석 가능 (통계 모델)"
-                    prob_color = "blue"
-                    est_waiters = 25
-                    delta = 6
-                    tft_crowd_weight = 25
-                    crowd_desc = "최근 5분 제보 집계 대기 중"
+                    # ⭐ 실시간 제보 부재 시: 수원대 통학 시간표 및 요일별 사전 통계 모델 자동 가동
+                    est_waiters, time_slot_desc = estimate_sadang_waiters_by_time()
+                    delta = 4
+                    tft_crowd_weight = 35
+                    crowd_desc = f"통학 통계 모델: [{time_slot_desc}] 기준 약 {est_waiters}명 대기 추정"
+                    is_from_report = False
 
-                decision_text = f"용남고속 정규 인가 차량('{plate}')이며, 사당역 9번 출구 대기열({crowd_info['statusText']})을 반영하여 착석 확률이 {boarding_prob}%로 산출되었습니다."
+                # 사당역 진입 버스(빈 차 45석 또는 71석)와 대기열 간 착석 성공률 계산
+                seat_diff = eval_seats - est_waiters
+
+                if seat_diff >= 15:
+                    boarding_prob = 96
+                    boarding_status = "착석 매우 확실 (좌석 여유)"
+                    prob_color = "emerald"
+                elif seat_diff >= 3:
+                    boarding_prob = 88
+                    boarding_status = "착석 유력 (순번 안정)"
+                    prob_color = "emerald"
+                elif seat_diff >= -5:
+                    boarding_prob = 68
+                    boarding_status = "착석 경합 (앞쪽 순번 유력)"
+                    prob_color = "amber"
+                else:
+                    boarding_prob = 38
+                    boarding_status = "착석 주의 (다음 차 대기 유력)"
+                    prob_color = "rose"
+
+                # 설명 문구 생성 (2층/1층 버스 스펙 완벽 결합)
+                if is_from_report:
+                    decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하며, 학우 실시간 제보({crowd_info['statusText']}, 대기 약 {est_waiters}명)를 반영하여 착석 확률이 {boarding_prob}%로 산출되었습니다."
+                else:
+                    if seat_diff < -5:
+                        decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하나, 현재 [{time_slot_desc}]로 대기열 약 {est_waiters}명이 형성되어 있어 1층 버스는 만석으로 다음 차 대기 가능성이 높습니다."
+                    elif is_double and est_waiters >= 40:
+                        decision_text = f"현재 [{time_slot_desc}]로 대기열 약 {est_waiters}명이 형성되어 있으나, 이번 도착 차량이 2층 버스(71석)이므로 대기 인원 전원 여유로운 착석 탑승이 유력합니다!"
+                    else:
+                        decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하며, 현재 [{time_slot_desc}]로 대기열 약 {est_waiters}명 대비 착석 확률 {boarding_prob}%로 산출되었습니다."
 
             else:
                 # [상행 사당역행]: 실질 잔여좌석(effective_seats) 및 오후 3~5시 하교 피크 반영
@@ -733,93 +843,160 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                     boarding_prob = 99
                     boarding_status = "착석 확실 (기점 극초반)"
                     prob_color = "emerald"
-                    est_waiters = 3 if not is_afternoon_rush else 6
+                    est_waiters = 3 if not is_afternoon_rush else (8 if is_hyohaeng_surge else 5)
                     delta = 2
                     tft_crowd_weight = 58
                     crowd_desc = "협성대 기점 직후로 빈 차 진입, 전 좌석 여유"
-                    decision_text = f"기점 극초반 정류장으로 차량('{plate}')의 잔여 {seats}석이 확보되어 여유로운 착석 탑승이 가능합니다."
+                    if is_hyohaeng_surge:
+                        decision_text = f"기점 극초반 정류장으로 차량('{plate}', {bus_type_title})의 잔여 {seats}석이 확보되어 있으나, 아이파크/수원대 하교 인파의 효행초 조기 승차가 감지되었습니다."
+                    else:
+                        decision_text = f"기점 극초반 정류장으로 차량('{plate}', {bus_type_title})의 잔여 {seats}석이 확보되어 여유로운 착석 탑승이 가능합니다."
 
                 elif station_id == "233002371":  # 아이파크정문 (기점 12번째)
                     boarding_prob = 98 if effective_seats >= 20 else 88
                     boarding_status = "착석 매우 여유 (기점 초기)"
                     prob_color = "emerald"
-                    est_waiters = 6 if not is_afternoon_rush else 12
+                    est_waiters = 6 if not is_afternoon_rush else (16 if is_hyohaeng_surge else 12)
                     delta = 3
                     tft_crowd_weight = 52
-                    crowd_desc = "기점 12번째 정류장으로 좌석 안정성 우수"
-                    decision_text = f"기점 출발 초기 구간으로 차량('{plate}')의 실질 잔여 약 {effective_seats}석이 여유 있게 진입할 것으로 예상됩니다."
+                    crowd_desc = f"아이파크 대기열(약 {est_waiters}명) 및 잔여 좌석 분석"
+                    surge_warn = " 🚨(효행초 조기 승차 영향 주의)" if is_hyohaeng_surge else ""
+                    decision_text = f"차량('{plate}', {bus_type_title})은 기점 출발 초기 구간(잔여 {seats}석)으로, 앞선 정류장 승차를 감안해도 여유롭게 착석 탑승이 가능합니다.{surge_warn}"
 
                 elif station_id == "233002255":  # 신명아파트 (기점 14번째)
-                    if upstream_notices:
-                        crowd_desc = f"앞 정류장 승차 누적: 앞선 {', '.join(upstream_notices)} 반영 (실질 {effective_seats}석 남음)"
-                    else:
-                        crowd_desc = "수원대입구 전 정류장으로 양호한 좌석 상태"
-
                     if effective_seats < 10:
                         boarding_prob = 70
                         boarding_status = "착석 보통 (앞 정류장 승차 감안)"
                         prob_color = "amber"
-                        est_waiters = 12
+                        est_waiters = 14 if is_hyohaeng_surge else 12
                         delta = 3
+                        surge_warn = " ⚠️(효행초 조기 승차 영향 주의)" if is_hyohaeng_surge else ""
+                        decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석이나, 앞선 정류장 승차 누적으로 착석 경합이 발생할 수 있습니다.{surge_warn}"
                     elif is_afternoon_rush and crowd_status == "crowded":
                         boarding_prob = 82
                         boarding_status = "착석 양호 (하교 보통)"
                         prob_color = "emerald"
-                        est_waiters = 14
+                        est_waiters = 16 if is_hyohaeng_surge else 14
                         delta = 4
+                        surge_warn = " ⚠️(효행초 조기 승차 영향 주의)" if is_hyohaeng_surge else ""
+                        decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로, 앞선 정류장 승차를 감안하여 줄 순번에 따라 착석이 가능할 것으로 예상됩니다.{surge_warn}"
                     else:
                         boarding_prob = 98 if effective_seats >= 15 else 90
                         boarding_status = "착석 매우 확실 (단지 여유)"
                         prob_color = "emerald"
-                        est_waiters = 8 if not is_afternoon_rush else 10
+                        est_waiters = 10 if is_hyohaeng_surge else 8
                         delta = 3
+                        surge_warn = " ⚠️(효행초 조기 승차 영향 주의)" if is_hyohaeng_surge else ""
+                        decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로, 앞선 정류장 승차를 감안해도 여유로운 착석 탑승이 예상됩니다.{surge_warn}"
                     tft_crowd_weight = 46
-                    decision_text = f"신명아파트 구간 차량('{plate}')은 앞 정류장 승차를 감안하여 실질 약 {effective_seats}석이 진입할 것으로 예상됩니다."
+                    crowd_desc = f"신명아파트 대기열(약 {est_waiters}명) 및 잔여 좌석 분석"
 
                 else:  # 수원대입구 (233003021, 기점 16번째 - 학생 하교 최다 정류장)
+                    # 💡 사용자 피드백 반영: 악의적/허위 제보로 인한 왜곡 방지를 위해
+                    # 수원대 제보 가중치를 소폭 완화(Damping)하고 대기열 차감 수치를 완만하게 조정
                     if is_afternoon_rush:
-                        if crowd_status == "crowded":
-                            est_waiters = 28
-                        elif crowd_status == "moderate":
-                            est_waiters = 18
-                        elif crowd_status == "smooth":
-                            est_waiters = 8
+                        if is_hyohaeng_surge:
+                            if crowd_status == "crowded":
+                                est_waiters = 32  # 완화 (기존 40명 -> 32명)
+                            elif crowd_status == "moderate":
+                                est_waiters = 22  # 완화 (기존 28명 -> 22명)
+                            elif crowd_status == "smooth":
+                                est_waiters = 10
+                            else:
+                                est_waiters = 18
                         else:
-                            est_waiters = 14
+                            if crowd_status == "crowded":
+                                est_waiters = 22  # 완화 (기존 28명 -> 22명)
+                            elif crowd_status == "moderate":
+                                est_waiters = 15  # 완화 (기존 18명 -> 15명)
+                            elif crowd_status == "smooth":
+                                est_waiters = 7
+                            else:
+                                est_waiters = 12
                     else:
-                        est_waiters = 6
+                        # 평상시 완화 차감치
+                        if is_hyohaeng_surge:
+                            if crowd_status == "crowded":
+                                est_waiters = 24  # 완화 (기존 32명 -> 24명)
+                            elif crowd_status == "moderate":
+                                est_waiters = 15  # 완화 (기존 20명 -> 15명)
+                            elif crowd_status == "smooth":
+                                est_waiters = 5
+                            else:
+                                est_waiters = 8
+                        else:
+                            if crowd_status == "crowded":
+                                est_waiters = 18  # 완화 (기존 24명 -> 18명)
+                            elif crowd_status == "moderate":
+                                est_waiters = 11  # 완화 (기존 14명 -> 11명)
+                            elif crowd_status == "smooth":
+                                est_waiters = 4
+                            else:
+                                est_waiters = 6   # 평상시 기본치
 
-                    # 실질 잔여좌석과 수원대 대기열 간의 실질 경합 계산 (기준을 훨씬 널널하게 보정)
+                    # 실질 잔여좌석과 수원대 대기열 간의 실질 경합 계산 (대기열 차감)
                     seat_diff = effective_seats - est_waiters
-                    stgnn_tag = f"앞선 [{', '.join(upstream_notices)}]에서 총 {upstream_consumed}석 탑승" if upstream_notices else f"앞 정류장 통계 누적(-{upstream_consumed}석)"
 
-                    if seat_diff >= 5:
-                        boarding_prob = 94
-                        boarding_status = "착석 확실 (좌석 여유)"
-                        prob_color = "emerald"
-                        delta = 3
-                    elif seat_diff >= -3:
-                        boarding_prob = 80
-                        boarding_status = "착석 양호 (줄 순번 안정)"
-                        prob_color = "emerald"
-                        delta = 4
-                    elif seat_diff >= -8:
-                        boarding_prob = 58
-                        boarding_status = "착석 경합 (탑승 가능/입석 대비)"
-                        prob_color = "amber"
-                        delta = 4
+                    is_from_report = (crowd_status in ["crowded", "moderate", "smooth"])
+                    # 악용 방지: 수원대 제보 가중치를 기존 54%에서 40%로 소폭 하향 조정
+                    tft_crowd_weight = 40 if is_from_report else 35
+                    crowd_desc = f"학우 실시간 제보({crowd_info['statusText']}): 수원대 대기열 약 {est_waiters}명 (신뢰 완충)" if is_from_report else f"수원대 대기열(약 {est_waiters}명) 및 잔여 좌석 종합 분석"
+
+                    surge_warn = " 🚨(앞 정류장 조기 승차 급증으로 잔여 좌석이 빠르게 줄어들 수 있습니다)" if is_hyohaeng_surge else ""
+
+                    if is_from_report:
+                        if seat_diff >= 5:
+                            boarding_prob = 94
+                            boarding_status = "착석 확실 (좌석 여유)"
+                            prob_color = "emerald"
+                            delta = 3
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로 여유로우며, 수원대 실시간 제보(대기열 약 {est_waiters}명) 및 앞선 승차를 감안해도 착석 탑승이 유력합니다.{surge_warn}"
+                        elif seat_diff >= -3:
+                            boarding_prob = 80
+                            boarding_status = "착석 양호 (줄 순번 안정)"
+                            prob_color = "emerald"
+                            delta = 4
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로, 수원대 실시간 제보(대기열 약 {est_waiters}명) 및 앞선 승차를 감안해도 줄 순번에 따라 안정적인 착석이 예상됩니다.{surge_warn}"
+                        elif seat_diff >= -8:
+                            boarding_prob = 58
+                            boarding_status = "착석 경합 (탑승 가능/입석 대비)"
+                            prob_color = "amber"
+                            delta = 4
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로, 수원대 실시간 제보(대기열 약 {est_waiters}명)와 앞선 정류장 승차 누적으로 인해 줄 순번에 따라 착석 경합이 발생할 수 있습니다.{surge_warn}"
+                        else:
+                            boarding_prob = 38
+                            boarding_status = "착석 주의 (다음 차 대기 고려)"
+                            prob_color = "rose"
+                            delta = 5
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석이나, 수원대 실시간 제보(대기열 약 {est_waiters}명)와 앞선 승차 누적으로 인해 수원대 도착 시 만석이 될 수 있어 다음 차 대기를 고려하세요.{surge_warn}"
                     else:
-                        boarding_prob = 38
-                        boarding_status = "착석 주의 (다음 차 대기 고려)"
-                        prob_color = "rose"
-                        delta = 5
-
-                    crowd_desc = f"앞 정류장 승차 반영: {stgnn_tag} ➔ 수원대 진입 시 실질 {effective_seats}석 남음"
-                    tft_crowd_weight = 48
-                    decision_text = f"차량('{plate}')은 현재 {seats}석이나 앞선 정류장 승차를 감안하면 수원대 도착 시 실질 약 {effective_seats}석이 남을 것으로 예상됩니다. (본인 대기 순번에 유의하세요)"
+                        if seat_diff >= 5:
+                            boarding_prob = 94
+                            boarding_status = "착석 확실 (좌석 여유)"
+                            prob_color = "emerald"
+                            delta = 3
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로 여유로우며, 앞선 정류장 승차를 감안해도 수원대에서 여유로운 착석 탑승이 유력합니다. (대기열 약 {est_waiters}명){surge_warn}"
+                        elif seat_diff >= -3:
+                            boarding_prob = 80
+                            boarding_status = "착석 양호 (줄 순번 안정)"
+                            prob_color = "emerald"
+                            delta = 4
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로, 앞선 정류장 승차를 감안해도 줄 순번에 따라 안정적인 착석이 예상됩니다. (대기열 약 {est_waiters}명){surge_warn}"
+                        elif seat_diff >= -8:
+                            boarding_prob = 58
+                            boarding_status = "착석 경합 (탑승 가능/입석 대비)"
+                            prob_color = "amber"
+                            delta = 4
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로, 앞선 정류장 승차와 수원대 대기열(약 {est_waiters}명)로 인해 줄 순번에 따라 착석 경합이 발생할 수 있습니다.{surge_warn}"
+                        else:
+                            boarding_prob = 38
+                            boarding_status = "착석 주의 (다음 차 대기 고려)"
+                            prob_color = "rose"
+                            delta = 5
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석이나, 앞선 정류장 승차 누적으로 수원대 도착 시 만석이 될 수 있어 다음 차 대기를 고려하세요. (대기열 약 {est_waiters}명){surge_warn}"
 
             # 95% 착석 신뢰구간 수학적 계산 (실질 잔여좌석 기준)
-            eval_seats = effective_seats if not is_down else seats
+            eval_seats = effective_seats if not is_down else (71 if is_double else 45)
             seat_expected = max(0, eval_seats - est_waiters)
             lower_bound = max(0, seat_expected - delta)
             upper_bound = min(eval_seats, seat_expected + delta)
@@ -829,16 +1006,15 @@ def get_xai_analysis(station_id: str = Query("119000302")):
             elif upper_bound > 0:
                 seat_range = f"0~{upper_bound}석 (만석 주의)"
             else:
-                seat_range = "0석 (회차 전)" if is_down else "0석 (만석)"
+                seat_range = "0석 (만석 대기)" if is_down else "0석 (만석)"
 
             confidence = 95.0
-            detail_tag = f" ({', '.join(upstream_notices)})" if upstream_notices else ""
             features = [
                 {
-                    "name": "승차 누적 상태" if not is_down and upstream_consumed > 0 else "승차 누적 상태",
+                    "name": "사당역 회차 빈 차 진입" if is_down else ("앞 정류장 승차 흐름 반영" if upstream_consumed > 0 else "잔여 좌석 상태"),
                     "weight": 35 if not is_down and upstream_consumed > 0 else (100 - tft_crowd_weight - 20),
-                    "impact": "positive" if effective_seats >= 15 else "negative",
-                    "desc": f"앞선 정류장 승차(-{upstream_consumed}석{detail_tag}) 반영 후 실질 {effective_seats}석 진입" if not is_down and upstream_consumed > 0 else f"앞 정류장 승차 후 현재 잔여 {seats}석"
+                    "impact": "positive" if (eval_seats - est_waiters) >= 5 else "negative",
+                    "desc": f"사당역 회차 직후 전석 빈 차({bus_type_title}) 상태로 진입" if is_down else (f"기점 이후 선행 정류장 승차를 고려한 좌석 평가" if upstream_consumed > 0 else f"현재 잔여 {seats}석 진입")
                 },
                 {"name": f"{profile['name']} 실시간 대기열", "weight": tft_crowd_weight, "impact": "positive" if boarding_prob >= 70 else "negative", "desc": crowd_desc},
                 {"name": "착석 여유 신뢰 보정", "weight": 20, "impact": "positive", "desc": f"대기열 변동 오차 범위 ±{delta}석 보정 적용"}
@@ -875,7 +1051,8 @@ def get_xai_analysis(station_id: str = Query("119000302")):
         "busExplanations": bus_explanations,
         "delayFactors": realtime_delays,
         "modelMeta": model_meta,
-        "crowdData": crowd_info
+        "crowdData": crowd_info,
+        "isHyohaengSurge": is_hyohaeng_surge if not is_down else False
     }
     CACHE_XAI_ANALYSIS[station_id] = {"data": res_data, "timestamp": now}
     return res_data

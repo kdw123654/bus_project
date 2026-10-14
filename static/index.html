@@ -125,7 +125,7 @@
               <span id="routeCrowdTitle" class="text-xs font-black text-gray-900 tracking-tight">사당역 9번 출구 대기열 실시간 현황</span>
             </div>
             <span id="rushHourBadge" class="hidden text-[10px] bg-amber-50 text-amber-800 font-bold px-2 py-0.5 rounded-full border border-amber-300">
-              오후 3~5시 하교 피크
+              하교 피크 (15:25~17:30)
             </span>
           </div>
           <p id="routeCrowdDesc" class="text-[11px] text-gray-500 leading-snug">
@@ -460,7 +460,7 @@
                 <h3 class="text-xs font-black text-gray-900 tracking-tight">${meta.name} 대기열 영향도 분석</h3>
               </div>
               <div class="flex items-center space-x-1">
-                ${crowd.isAfternoonRush ? '<span class="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded border border-amber-300">오후 3~5시 하교 피크</span>' : ''}
+                ${crowd.isAfternoonRush ? '<span class="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded border border-amber-300">하교 피크 (15:25~17:30)</span>' : ''}
                 <span class="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-full border border-indigo-200">
                   학우 제보 Feature
                 </span>
@@ -860,6 +860,23 @@
       } catch (err) {
         console.error("데이터 로드 오류:", err);
         if (refreshBtn) refreshBtn.classList.remove("animate-spin");
+        if (arrivalContainer) {
+          arrivalContainer.innerHTML = `
+            <div class="p-3.5 bg-amber-50 rounded-xl border border-amber-200 text-center space-y-1.5">
+              <div class="text-xs font-bold text-amber-900 flex items-center justify-center space-x-1">
+                <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                <span>서버 연결 지연 (재연결 시도 중...)</span>
+              </div>
+              <p class="text-[11px] text-amber-700 leading-snug">
+                서버가 절전 모드에서 깨어나는 중이거나 일시적인 통신 지연입니다. 잠시 후 자동으로 다시 시도합니다.
+              </p>
+              <button onclick="fetchBusData()" class="text-[11px] bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1 rounded-lg shadow-xs transition">
+                지금 다시 시도 🔄
+              </button>
+            </div>
+          `;
+          setTimeout(() => fetchBusData(false), 3000);
+        }
       }
     }
 
