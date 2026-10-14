@@ -863,7 +863,8 @@
       }
     }
 
-    fetchBusData(true);
+    // 최초 접속 시에는 스크롤을 내리지 않고 상단에 그대로 유지 (정류장 칩 클릭 시에만 자동 스크롤)
+    fetchBusData(false);
     updateCrowdButtonsUI();
     setInterval(updateCrowdButtonsUI, 1000);
 

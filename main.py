@@ -829,7 +829,7 @@ def get_xai_analysis(station_id: str = Query("119000302")):
             elif upper_bound > 0:
                 seat_range = f"0~{upper_bound}석 (만석 주의)"
             else:
-                seat_range = "0석 (회차 전)"
+                seat_range = "0석 (회차 전)" if is_down else "0석 (만석)"
 
             confidence = 95.0
             detail_tag = f" ({', '.join(upstream_notices)})" if upstream_notices else ""
