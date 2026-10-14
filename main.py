@@ -587,19 +587,19 @@ def estimate_sadang_waiters_by_time():
     time_float = hour + minute / 60.0
 
     if 7.5 <= time_float < (7 + 50/60.0):  # 07:30 ~ 07:50 (1교시 등교열 급증 구간)
-        base = 48
+        base = 50
         desc = f"{day_name}요일 1교시 등교열 급증 (07:30~07:50)"
     elif (7 + 50/60.0) <= time_float < (8 + 25/60.0):  # 07:50 ~ 08:25 (9시 1교시 등교 최대 극피크)
-        base = 66
+        base = 68
         desc = f"{day_name}요일 1교시 등교 극피크 (07:50~08:25)"
-    elif (8 + 25/60.0) <= time_float < (8 + 50/60.0):  # 08:25 ~ 08:50 (8:30 기점 1교시 마무리 및 대기열 감소세)
-        base = 36
-        desc = f"{day_name}요일 1교시 승차 마무리·대기열 감소세 (08:25~08:50)"
+    elif (8 + 25/60.0) <= time_float < (8 + 50/60.0):  # 08:25 ~ 08:50 (1교시 직전 막바지 등교 & 2교시 유입)
+        base = 60
+        desc = f"{day_name}요일 1교시 막바지 집중·2교시 유입 (08:25~08:50)"
     elif (8 + 50/60.0) <= time_float < (9 + 35/60.0):  # 08:50 ~ 09:35 (10:30 2교시 등교 피크)
-        base = 48
+        base = 55
         desc = f"{day_name}요일 10:30 2교시 등교 피크 (08:50~09:35)"
     elif (9 + 35/60.0) <= time_float < (10 + 10/60.0):  # 09:35 ~ 10:10 (2교시 승차 마무리 및 완화)
-        base = 25
+        base = 32
         desc = f"{day_name}요일 2교시 승차 마무리 (09:35~10:10)"
     elif (10 + 10/60.0) <= time_float < 12.0:  # 10:10 ~ 12:00 (오전 분산 통학)
         base = 15
@@ -936,28 +936,28 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                     est_waiters = 10
                     delta = 3
                     tft_crowd_weight = 40
-                    crowd_desc = "학우 실시간 제보: 대기열이 짧아 즉시 착석 유력"
+                    crowd_desc = f"학우 실시간 제보(여유): 대기열 약 {est_waiters}명 차감 반영"
                     is_from_report = True
                 elif crowd_status == "moderate":
                     base_mod = 38 if is_morning_rush else 20
                     est_waiters = max(15, int(round(base_mod * decay_fac)))
                     delta = 4
                     tft_crowd_weight = 42
-                    crowd_desc = "학우 실시간 제보: 보통 수준 대기열로 줄 순번에 따라 착석 가능" if not is_sticky else "직전 제보 잔류: 버스 승차 대기열 반영 중"
+                    crowd_desc = f"학우 실시간 제보(보통): 대기열 약 {est_waiters}명 차감 반영" if not is_sticky else f"직전 제보 잔류: 대기열 약 {est_waiters}명 차감 반영"
                     is_from_report = True
                 elif crowd_status == "crowded":
                     base_crowd = 72 if is_morning_rush else 45
                     est_waiters = max(28, int(round(base_crowd * decay_fac)))
                     delta = 6
                     tft_crowd_weight = 50
-                    crowd_desc = "학우 실시간 제보: 대기 인원 포화로 다음 차 대기 가능성 높음" if not is_sticky else "직전 혼잡 제보 잔류: 버스 승차 미완료로 대기 인원 지속"
+                    crowd_desc = f"학우 실시간 제보(포화): 대기열 약 {est_waiters}명 대폭 차감 반영" if not is_sticky else f"직전 혼잡 제보 잔류: 대기열 약 {est_waiters}명 차감 반영"
                     is_from_report = True
                 else:
                     # ⭐ 실시간 제보 부재 시: 수원대 통학 시간표 및 요일별 사전 통계 모델 자동 가동
                     est_waiters, time_slot_desc = estimate_sadang_waiters_by_time()
                     delta = 4
                     tft_crowd_weight = 35
-                    crowd_desc = f"통학 통계 모델: [{time_slot_desc}] 기준 대기열 분석"
+                    crowd_desc = f"통학 통계 모델: [{time_slot_desc}] 기준 대기열 약 {est_waiters}명 차감 반영"
                     is_from_report = False
 
                 # 2번째 버스일 경우: 1번째 버스 승차 후 잔여 대기열 이월 및 후속 유입 반영
