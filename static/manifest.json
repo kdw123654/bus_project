@@ -1,0 +1,24 @@
+{
+  "name": "7790 XAI 스마트 버스 (수원대)",
+  "short_name": "7790 XAI",
+  "description": "수원대학교 7790번 실시간 노선도 및 XAI 스마트 통학 예측 시스템",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

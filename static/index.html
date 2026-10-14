@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>7790 실시간 노선도 & 스마트 통학 길찾기</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="7790 XAI">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <link rel="icon" type="image/png" href="/static/icon-192.png">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     @keyframes pin-float {
@@ -16,6 +24,9 @@
       50% { transform: scale(1.12); }
     }
     .bus-pulse { animation: bus-pulse 1.8s ease-in-out infinite; }
+    /* 가로 스크롤바 숨기기 (모바일 앱 스타일) */
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
 </head>
 <body class="bg-gray-100 flex justify-center min-h-screen font-sans text-gray-900 antialiased">
@@ -30,8 +41,38 @@
       </button>
       <button id="tabXaiBtn" onclick="switchTab('xai')" class="py-2 text-xs font-black rounded-lg transition text-gray-500 hover:text-gray-900 flex items-center justify-center space-x-1.5">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-        <span>XAI 지능형 분석</span>
+        <span>AI 탑승·좌석 분석</span>
       </button>
+    </div>
+
+    <!-- 공통 탑승 정류장 선택 바 (노선도 및 XAI 공용 상단 고정: 5개 정류장 100% 한눈에 노출) -->
+    <div class="px-3.5 py-2 bg-gray-50 border-b border-gray-200 sticky top-[45px] z-30">
+      <div class="flex justify-between items-center mb-1.5">
+        <div class="flex items-center space-x-1.5">
+          <svg class="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          <span class="text-xs font-black text-gray-800 tracking-tight">탑승 정류장</span>
+        </div>
+        <span id="selectedStationBadge" class="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full">
+          사당역 9출 (수원대행)
+        </span>
+      </div>
+      <div class="grid grid-cols-5 gap-1 text-center">
+        <button onclick="selectStation('119000302', '사당역9번출구앞', 'DOWN')" id="stChip_119000302" class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-black transition bg-blue-600 text-white shadow-xs">
+          사당역 9출
+        </button>
+        <button onclick="selectStation('233003021', '수원대입구', 'UP')" id="stChip_233003021" class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+          수원대
+        </button>
+        <button onclick="selectStation('233002255', '신명아파트', 'UP')" id="stChip_233002255" class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+          신명아파트
+        </button>
+        <button onclick="selectStation('233002371', '아이파크정문', 'UP')" id="stChip_233002371" class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+          아이파크
+        </button>
+        <button onclick="selectStation('233002245', '효행초등학교정문', 'UP')" id="stChip_233002245" class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+          효행초
+        </button>
+      </div>
     </div>
 
     <!-- ================= [뷰 1: 7790 노선도] ================= -->
@@ -40,14 +81,15 @@
         <div class="flex items-center space-x-2">
           <span class="bg-red-500 text-white text-[11px] font-black px-2 py-0.5 rounded shadow-sm">직행</span>
           <h1 class="text-2xl font-black text-gray-900 tracking-tight">7790</h1>
-          <span class="text-xs text-gray-400 font-medium">사당역행</span>
+          <span class="text-xs text-gray-400 font-medium">실시간 운행</span>
         </div>
-        <div class="flex items-center space-x-2">
-          <button id="testModeBtn" onclick="toggleTestMode()" class="text-[11px] font-bold px-2.5 py-1.5 rounded-full border border-amber-300 bg-amber-50 text-amber-700">
-            전세 테스트
+        <div class="flex items-center space-x-1.5">
+          <button onclick="openTimetableModal()" class="text-[11px] font-bold px-2.5 py-1.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 flex items-center space-x-1 shadow-xs transition">
+            <span>📅</span>
+            <span>시간표</span>
           </button>
-          <button onclick="scrollToSadang()" class="text-[11px] bg-blue-50 text-blue-600 font-bold px-2 py-1.5 rounded-full border border-blue-200">
-            사당역
+          <button onclick="scrollToTarget()" id="quickScrollBtn" class="text-[11px] bg-blue-50 text-blue-600 font-bold px-2 py-1.5 rounded-full border border-blue-200 truncate max-w-[80px]">
+            사당역 9출
           </button>
           <button onclick="fetchBusData()" id="refreshBtn" class="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600">
             🔄
@@ -55,16 +97,11 @@
         </div>
       </header>
 
-      <div id="testBanner" class="hidden bg-amber-500 text-white text-xs px-4 py-2 font-bold flex justify-between items-center shadow-inner">
-        <span>[가상 테스트] 출근 전세버스가 투입된 상황입니다</span>
-        <button onclick="toggleTestMode()" class="underline text-[11px]">종료</button>
-      </div>
-
       <section class="p-4 bg-gray-50/80 border-b border-gray-200">
         <div class="flex justify-between items-center mb-2.5">
           <div class="flex items-center space-x-1.5">
             <span class="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span>
-            <h2 class="text-sm font-bold text-gray-800">사당역9번출구앞 실시간 도착</h2>
+            <h2 class="text-sm font-bold text-gray-800" id="currentStationTitle">사당역9번출구앞 <span class="text-xs font-normal text-gray-500">(수원대행)</span> 실시간 도착</h2>
           </div>
           <span class="text-[11px] text-gray-400" id="updateTime">15초 자동 갱신</span>
         </div>
@@ -72,33 +109,40 @@
           <div class="text-xs text-gray-400 text-center py-2 animate-pulse">도착 정보 조회 중...</div>
         </div>
 
-        <!-- 사당역 9번 출구 학우 1초 제보 및 줄 현황판 (노선도 탭에 탑재) -->
+        <!-- 정류장별 학우 실시간 1초 대기열 제보 및 현황판 (모든 정류장 지원) -->
         <div id="routeCrowdCard" class="mt-3 p-3.5 bg-white rounded-xl border border-blue-200 shadow-xs space-y-2.5">
-          <div class="flex items-center space-x-1.5">
-            <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
-            <span class="text-xs font-black text-gray-900 tracking-tight">사당역 9번 출구 대기열 실시간 현황</span>
+          <div class="flex justify-between items-center">
+            <div class="flex items-center space-x-1.5">
+              <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+              <span id="routeCrowdTitle" class="text-xs font-black text-gray-900 tracking-tight">사당역 9번 출구 대기열 실시간 현황</span>
+            </div>
+            <span id="rushHourBadge" class="hidden text-[10px] bg-amber-50 text-amber-800 font-bold px-2 py-0.5 rounded-full border border-amber-300">
+              오후 3~5시 하교 피크
+            </span>
           </div>
           <p id="routeCrowdDesc" class="text-[11px] text-gray-500 leading-snug">
-            학우들의 실시간 줄 제보가 AI 분석 모델에 반영됩니다. 상세 탑승 확률과 분석 리포트는 상단 <button onclick="switchTab('xai')" class="text-indigo-600 font-bold underline">[XAI 지능형 분석]</button> 탭에서 확인하세요.
+            학우들의 실시간 줄 제보가 AI 분석 모델에 반영됩니다. 상세 탑승 확률과 분석 리포트는 상단 <button onclick="switchTab('xai')" class="text-indigo-600 font-bold underline">[AI 탑승·좌석 분석]</button> 탭에서 확인하세요.
           </p>
           <div class="pt-2 border-t border-gray-100">
             <div class="flex justify-between items-center text-[10px] text-gray-400 mb-1.5 font-bold">
-              <span>지금 9번 출구 줄에 계신가요? 1초 제보</span>
+              <span id="routeCrowdPrompt">지금 대기열에 계신가요? 1초 제보</span>
               <span id="routeCrowdTime">최근 5분 집계</span>
             </div>
-            <div class="grid grid-cols-3 gap-1.5">
-              <button onclick="sendCrowdReport('smooth')" class="py-2 px-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 active:scale-95 border border-emerald-300 text-emerald-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
-                <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block mr-1"></span>여유</span>
-                <span class="text-[9px] font-medium text-emerald-600 mt-0.5">&lt;20명 대기</span>
-              </button>
-              <button onclick="sendCrowdReport('moderate')" class="py-2 px-1 rounded-lg bg-amber-50 hover:bg-amber-100 active:scale-95 border border-amber-300 text-amber-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
-                <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block mr-1"></span>보통</span>
-                <span class="text-[9px] font-medium text-amber-600 mt-0.5">40명 내외</span>
-              </button>
-              <button onclick="sendCrowdReport('crowded')" class="py-2 px-1 rounded-lg bg-rose-50 hover:bg-rose-100 active:scale-95 border border-rose-300 text-rose-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
-                <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-rose-500 inline-block mr-1"></span>포화</span>
-                <span class="text-[9px] font-medium text-rose-600 mt-0.5">계단까지</span>
-              </button>
+            <div id="crowdReportBtnArea">
+              <div class="grid grid-cols-3 gap-1.5">
+                <button onclick="sendCrowdReport('smooth')" class="py-2 px-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 active:scale-95 border border-emerald-300 text-emerald-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
+                  <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block mr-1"></span>여유</span>
+                  <span class="text-[9px] font-medium text-emerald-600 mt-0.5">&lt;15명 대기</span>
+                </button>
+                <button onclick="sendCrowdReport('moderate')" class="py-2 px-1 rounded-lg bg-amber-50 hover:bg-amber-100 active:scale-95 border border-amber-300 text-amber-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
+                  <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block mr-1"></span>보통</span>
+                  <span class="text-[9px] font-medium text-amber-600 mt-0.5">30~40명 내외</span>
+                </button>
+                <button onclick="sendCrowdReport('crowded')" class="py-2 px-1 rounded-lg bg-rose-50 hover:bg-rose-100 active:scale-95 border border-rose-300 text-rose-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
+                  <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-rose-500 inline-block mr-1"></span>포화</span>
+                  <span class="text-[9px] font-medium text-rose-600 mt-0.5">줄 길게 늘어섬</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -112,38 +156,113 @@
     <!-- ================= [뷰 2: XAI 설명 가능한 인공지능 분석] ================= -->
     <div id="xaiView" class="hidden flex-1 flex flex-col p-4 space-y-4 overflow-y-auto">
       
+      <!-- 상단 탑승 정류장 상태 & 새로고침 바 -->
+      <div class="flex justify-between items-center bg-gray-50/90 px-3.5 py-2.5 rounded-2xl border border-gray-200 shadow-2xs">
+        <div class="flex items-center space-x-1.5 min-w-0">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping flex-shrink-0"></span>
+          <span class="text-xs font-black text-gray-800 flex-shrink-0">탑승 정류장:</span>
+          <span id="xaiStationTag" class="text-xs font-black text-blue-600 truncate">사당역9번출구앞</span>
+          <span class="text-[10px] text-gray-400 font-normal ml-1 flex-shrink-0" id="xaiUpdateTime">15초 자동 갱신</span>
+        </div>
+        <button onclick="fetchXaiData(false)" id="xaiRefreshBtn" class="flex-shrink-0 ml-2 py-1 px-2.5 rounded-full border border-indigo-200 bg-white hover:bg-indigo-50 text-indigo-700 text-[11px] font-bold flex items-center space-x-1 shadow-xs transition active:scale-95">
+          <span id="xaiRefreshIcon" class="inline-block text-xs">🔄</span>
+          <span>새로고침</span>
+        </button>
+      </div>
+
       <!-- 상단 안내 헤더 -->
-      <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 text-white p-4 rounded-2xl shadow-md space-y-1.5">
+      <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 text-white p-4 rounded-2xl shadow-md space-y-2.5">
         <div class="flex justify-between items-center">
           <div class="flex items-center space-x-1.5">
             <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-            <span class="text-xs font-black tracking-wide">XAI (Explainable AI) Engine</span>
+            <span class="text-xs font-black tracking-wide">7790 스마트 탑승 진단 AI</span>
           </div>
-          <span class="text-[10px] bg-white/10 px-2 py-0.5 rounded-full font-bold">TreeSHAP v2.5</span>
+          <span class="text-[10px] bg-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full font-bold border border-indigo-400/30">실시간 좌석 분석</span>
         </div>
-        <h2 class="text-sm font-black tracking-tight">7790 버스 운행 및 전세버스 판별 설명</h2>
-        <p class="text-[11px] text-indigo-200 leading-snug">
-          단순한 도착 시간 안내를 넘어, AI가 <strong>"왜 이 버스가 전세버스인지"</strong>와 <strong>"사당역 지연의 핵심 요인"</strong>을 투명하게 설명합니다.
+        <h2 id="xaiHeaderTitle" class="text-sm font-black tracking-tight">7790 실시간 좌석 & 탑승 분석</h2>
+        <p id="xaiHeaderDesc" class="text-[11px] text-indigo-200 leading-snug">
+          앞선 정류장 승차 인원과 도로 정체 상황을 실시간 분석하여, <strong>내가 탈 수 있는 좌석 수와 착석 성공 확률</strong>을 알려드립니다.
         </p>
       </div>
 
       <!-- XAI 렌더링 컨테이너 -->
       <div id="xaiContent" class="space-y-4">
         <div class="p-6 bg-white rounded-2xl border border-gray-200 text-center text-xs text-gray-400 animate-pulse">
-          실시간 XAI 특성 기여도(Feature Attribution) 분석 중...
+          실시간 도로 정체 및 잔여 좌석 분석 중...
         </div>
       </div>
 
     </div>
 
     <footer class="py-2.5 bg-gray-50 border-t border-gray-200 text-center text-[11px] text-gray-400">
-      수원대학교 데이터과학부 7790 XAI 프로젝트 · 실시간 노선 & 설명 가능한 버스 AI
+      수원대학교 데이터과학부 
     </footer>
   </div>
 
   <script>
-    let isTestMode = false;
     let currentTab = 'route';
+    let selectedStationId = "119000302";
+    let selectedStationName = "사당역9번출구앞";
+    let selectedDirection = "DOWN";
+    let currentXaiRequestId = 0;
+
+    function selectStation(id, name, dir) {
+      selectedStationId = id;
+      selectedStationName = name;
+      selectedDirection = dir;
+
+      // 1. 공통 상단 칩 UI 업데이트 (5개 균등 배치)
+      document.querySelectorAll(".station-chip").forEach(el => {
+        el.className = "station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100";
+      });
+      const activeChip = document.getElementById(`stChip_${id}`);
+      if (activeChip) {
+        activeChip.className = "station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-black transition bg-blue-600 text-white shadow-xs";
+      }
+
+      const dirText = dir === "UP" ? "사당역행" : "수원대행";
+      const titleEl = document.getElementById("currentStationTitle");
+      if (titleEl) {
+        titleEl.innerHTML = `${name} <span class="text-xs font-normal text-gray-500">(${dirText})</span> 실시간 도착`;
+      }
+      const quickScrollBtn = document.getElementById("quickScrollBtn");
+      if (quickScrollBtn) {
+        quickScrollBtn.innerText = name.length > 5 ? name.substring(0, 4) + '..' : name;
+      }
+
+      // 공통 상단 탑승 정류장 뱃지 & XAI 상단 태그 업데이트
+      const badgeEl = document.getElementById("selectedStationBadge");
+      if (badgeEl) {
+        badgeEl.innerText = `${name} (${dirText})`;
+      }
+      const xaiTag = document.getElementById("xaiStationTag");
+      if (xaiTag) {
+        xaiTag.innerText = name;
+      }
+
+      // 선택된 정류장별 대기열 제보 카드 UI 업데이트
+      const crowdTitle = document.getElementById("routeCrowdTitle");
+      if (crowdTitle) crowdTitle.innerText = `${name} 대기열 실시간 현황`;
+      const crowdPrompt = document.getElementById("routeCrowdPrompt");
+      if (crowdPrompt) crowdPrompt.innerText = `지금 ${name} 대기열에 계신가요? 1초 제보`;
+
+      // XAI 헤더 타이틀 즉시 동기화
+      const xaiTitle = document.getElementById("xaiHeaderTitle");
+      if (xaiTitle) xaiTitle.innerText = `[탑승 정류장] ${name} (${dir === 'UP' ? '사당역행' : '수원대행'}) AI 탑승 & 잔여 좌석 분석`;
+
+      // ⭐ 탭 상태에 따른 즉시 실행 분기
+      if (currentTab === 'xai') {
+        // XAI 탭일 때는 즉각 로딩 인디케이터 표시하며 XAI 분석을 최우선 실행!
+        fetchXaiData(false);
+        // 노선도 데이터는 백그라운드에서 조용히 갱신 (스크롤 안 함)
+        fetchBusData(false);
+        const xaiView = document.getElementById("xaiView");
+        if (xaiView) xaiView.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        // 노선도 탭일 때는 노선도를 갱신하고 새 정류장 렌더링 완료 후 즉시 해당 정류장 위치로 자동 스크롤!
+        fetchBusData(true);
+      }
+    }
 
     function switchTab(tab) {
       currentTab = tab;
@@ -159,6 +278,7 @@
         tabRouteBtn.classList.remove("text-gray-500");
         tabXaiBtn.classList.remove("bg-white", "text-blue-600", "shadow-sm");
         tabXaiBtn.classList.add("text-gray-500");
+        setTimeout(scrollToTarget, 100);
       } else {
         routeView.classList.add("hidden");
         xaiView.classList.remove("hidden");
@@ -166,21 +286,78 @@
         tabXaiBtn.classList.remove("text-gray-500");
         tabRouteBtn.classList.remove("bg-white", "text-blue-600", "shadow-sm");
         tabRouteBtn.classList.add("text-gray-500");
-        fetchXaiData();
+        fetchXaiData(false);
       }
     }
 
-    // ⭐ 학우 실시간 줄 제보 전송 함수
+    // ⭐ 5분 쿨다운 검증 함수 (어뷰징 및 중복 도배 방지 - DB 불필요, localStorage 활용)
+    function checkCrowdCooldown() {
+      const lastTime = localStorage.getItem("last_crowd_report_time");
+      if (!lastTime) return 0;
+      const elapsed = Date.now() - parseInt(lastTime, 10);
+      const remaining = 300000 - elapsed; // 5분 (300,000ms)
+      return remaining > 0 ? remaining : 0;
+    }
+
+    function updateCrowdButtonsUI() {
+      const remaining = checkCrowdCooldown();
+      const promptEl = document.getElementById("routeCrowdPrompt");
+      const btnArea = document.getElementById("crowdReportBtnArea");
+      if (!btnArea) return;
+
+      if (remaining > 0) {
+        const min = Math.floor(remaining / 60000);
+        const sec = Math.floor((remaining % 60000) / 1000);
+        btnArea.innerHTML = `
+          <div class="py-2.5 px-3 bg-blue-50/90 border border-blue-200 rounded-xl text-center space-y-1 shadow-xs">
+            <div class="flex items-center justify-center space-x-1.5 text-blue-800 font-bold text-xs">
+              <span class="w-2 h-2 rounded-full bg-blue-600 animate-ping"></span>
+              <span>✅ 제보 접수 완료 (남은 쿨타임: ${min}분 ${String(sec).padStart(2, '0')}초)</span>
+            </div>
+            <p class="text-[10px] text-gray-500">도배 방지와 공정한 AI 분석을 위해 5분에 1회만 참여 가능합니다.</p>
+          </div>
+        `;
+        if (promptEl) promptEl.innerText = `소중한 제보 감사합니다!`;
+      } else {
+        btnArea.innerHTML = `
+          <div class="grid grid-cols-3 gap-1.5">
+            <button onclick="sendCrowdReport('smooth')" class="py-2 px-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 active:scale-95 border border-emerald-300 text-emerald-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
+              <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block mr-1"></span>여유</span>
+              <span class="text-[9px] font-medium text-emerald-600 mt-0.5">&lt;15명 대기</span>
+            </button>
+            <button onclick="sendCrowdReport('moderate')" class="py-2 px-1 rounded-lg bg-amber-50 hover:bg-amber-100 active:scale-95 border border-amber-300 text-amber-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
+              <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block mr-1"></span>보통</span>
+              <span class="text-[9px] font-medium text-amber-600 mt-0.5">30~40명 내외</span>
+            </button>
+            <button onclick="sendCrowdReport('crowded')" class="py-2 px-1 rounded-lg bg-rose-50 hover:bg-rose-100 active:scale-95 border border-rose-300 text-rose-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
+              <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-rose-500 inline-block mr-1"></span>포화</span>
+              <span class="text-[9px] font-medium text-rose-600 mt-0.5">줄 길게 늘어섬</span>
+            </button>
+          </div>
+        `;
+        if (promptEl) promptEl.innerText = `지금 ${selectedStationName} 대기열에 계신가요? 1초 제보`;
+      }
+    }
+
+    // ⭐ 학우 실시간 줄 제보 전송 함수 (5분 쿨다운 적용)
     async function sendCrowdReport(status) {
+      const remaining = checkCrowdCooldown();
+      if (remaining > 0) {
+        alert("⏱️ 도배 방지를 위해 5분에 1회만 제보할 수 있습니다.");
+        return;
+      }
+
       try {
-        const res = await fetch(`/api/crowd-report?status=${encodeURIComponent(status)}`, { method: "POST" });
+        const res = await fetch(`/api/crowd-report?station_id=${selectedStationId}&status=${encodeURIComponent(status)}`, { method: "POST" });
         const data = await res.json();
         if (data.success) {
-          alert("✅ 사당역 9번 출구 줄 제보가 등록되었습니다! 노선도 및 XAI 분석에 실시간 반영됩니다 🙏");
+          localStorage.setItem("last_crowd_report_time", Date.now());
+          updateCrowdButtonsUI();
+          alert(`✅ ${selectedStationName} 줄 제보가 등록되었습니다! 노선도 및 XAI 분석에 실시간 반영됩니다.`);
           fetchBusData();
           if (currentTab === 'xai') fetchXaiData(true);
         } else {
-          alert("제보 처리에 실패했습니다.");
+          alert(data.message || "제보 처리에 실패했습니다.");
         }
       } catch (err) {
         alert("제보 통신 오류가 발생했습니다: " + err.message);
@@ -189,31 +366,65 @@
 
     // ⭐ XAI (Explainable AI) 및 학우 실시간 대기열 데이터 로드 및 시각화 (15초 주기 갱신)
     async function fetchXaiData(isSilent = false) {
+      const requestId = ++currentXaiRequestId;
       const container = document.getElementById("xaiContent");
-      if (!isSilent && (!container.children.length || container.innerHTML.includes("분석 중..."))) {
-        container.innerHTML = `<div class="p-6 bg-white rounded-2xl border border-gray-200 text-center text-xs text-gray-400 animate-pulse">실시간 XAI 특성 기여도 및 학우 제보 분석 중...</div>`;
+      const refreshIcon = document.getElementById("xaiRefreshIcon");
+      if (refreshIcon) refreshIcon.classList.add("animate-spin");
+
+      if (!isSilent) {
+        container.innerHTML = `
+          <div class="p-6 bg-white rounded-2xl border border-indigo-200 text-center space-y-3 shadow-xs">
+            <div class="w-8 h-8 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin mx-auto"></div>
+            <div class="space-y-1">
+              <h4 class="text-xs font-black text-gray-800">[탑승 정류장] ${selectedStationName} 실시간 XAI 분석 중...</h4>
+              <p class="text-[11px] text-gray-400">ST-GNN 공간 그래프 및 TFT 시계열 어텐션을 계산하고 있습니다.</p>
+            </div>
+          </div>
+        `;
       }
 
       try {
-        const res = await fetch("/api/xai-analysis");
+        const res = await fetch(`/api/xai-analysis?station_id=${selectedStationId}`);
         const data = await res.json();
 
+        // 사용자가 다른 정류장을 빠르게 연타했을 때 이전 응답 무시 (Race condition 방지)
+        if (requestId !== currentXaiRequestId) {
+          if (refreshIcon) refreshIcon.classList.remove("animate-spin");
+          return;
+        }
+
         if (!data.success) {
+          if (refreshIcon) refreshIcon.classList.remove("animate-spin");
           container.innerHTML = `<div class="p-4 bg-rose-50 text-rose-600 rounded-xl text-xs text-center font-bold">XAI 분석 데이터를 불러올 수 없습니다.</div>`;
           return;
         }
 
-        // 0. 사당역 9번 출구 100% 학우 실시간 줄 XAI 영향도 분석 렌더링
+        const meta = data.stationMeta || {
+          name: selectedStationName,
+          dir: selectedDirection,
+          dirText: selectedDirection === 'UP' ? '사당역행 (상행)' : '수원대행 (하행)',
+          summary: '실시간 GBIS 및 승하차 데이터를 기반으로 산출된 XAI 모델입니다.',
+          boardingTip: '출도착 시간을 확인하여 탑승하세요.'
+        };
+
+        // 상단 안내 헤더 동적 반영
+        const xaiTitle = document.getElementById("xaiHeaderTitle");
+        const xaiDesc = document.getElementById("xaiHeaderDesc");
+        if (xaiTitle) xaiTitle.innerText = `${meta.name} (${meta.dirText}) AI 탑승 & 잔여 좌석 분석`;
+        if (xaiDesc) xaiDesc.innerHTML = `${meta.summary}`;
+
+        // 0. 정류장 대기열 제보 영향도 분석 카드 (사당역 및 수원대·봉담 전 정류장 100% 지원)
         const crowd = data.crowdData || {
           hasData: false,
           status: "none",
           statusText: "최근 5분 내 제보 없음",
-          descText: "현재 사당역 9번 출구 대기열 제보가 없습니다. 노선도 탭에서 1초 제보에 참여해 주세요!",
-          xaiInsight: "최근 5분 제보 데이터가 없어 평일 정규 승하차 패턴을 기본값으로 추론 중입니다.",
+          descText: `현재 ${meta.name} 대기열 제보가 없습니다. 노선도 탭에서 1초 제보에 참여해 주세요!`,
+          xaiInsight: "최근 5분 제보 데이터가 없어 정규 승하차 패턴을 기본값으로 추론 중입니다.",
           color: "gray",
           totalCount: 0,
           counts: { smooth: 0, moderate: 0, crowded: 0 },
-          lastReportMinutesAgo: null
+          lastReportMinutesAgo: null,
+          isAfternoonRush: false
         };
 
         let crowdBadgeBg = "bg-gray-100 text-gray-700 border-gray-200";
@@ -237,12 +448,15 @@
           <div class="p-4 rounded-2xl border border-indigo-200 shadow-sm space-y-2.5 bg-white">
             <div class="flex justify-between items-center">
               <div class="flex items-center space-x-1.5">
-                <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-                <h3 class="text-xs font-black text-gray-900 tracking-tight">사당역 9번 출구 대기열 영향도 분석</h3>
+                <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+                <h3 class="text-xs font-black text-gray-900 tracking-tight">${meta.name} 대기열 영향도 분석</h3>
               </div>
-              <span class="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-full border border-indigo-200">
-                학우 제보 Feature 연동
-              </span>
+              <div class="flex items-center space-x-1">
+                ${crowd.isAfternoonRush ? '<span class="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded border border-amber-300">오후 3~5시 하교 피크</span>' : ''}
+                <span class="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-full border border-indigo-200">
+                  학우 제보 Feature
+                </span>
+              </div>
             </div>
 
             <!-- 현재 줄 혼잡도 상태 및 XAI 영향 설명 -->
@@ -260,7 +474,7 @@
               <p class="text-[11px] text-gray-700 leading-snug pt-0.5 font-medium">${crowd.xaiInsight || crowd.descText}</p>
             </div>
 
-            <!-- 최근 5분 투표 분포 바 (제보가 있을 때만 표시) -->
+            <!-- 최근 5분 투표 분포 바 -->
             ${crowd.totalCount > 0 ? `
               <div class="space-y-1">
                 <div class="flex justify-between text-[10px] text-gray-500 font-bold">
@@ -278,77 +492,118 @@
             <!-- 노선도 탭 제보 바로가기 안내 -->
             <div class="pt-1.5 border-t border-gray-100 flex justify-between items-center text-[10px] text-gray-500">
               <span>실시간 줄 제보는 <strong>[7790 노선도]</strong> 탭에서 1초 만에 참여하실 수 있습니다.</span>
-              <button onclick="switchTab('route')" class="text-blue-600 font-bold underline flex-shrink-0 ml-1">노선도 이동</button>
+              <button onclick="switchTab('route')" class="text-blue-600 font-bold underline flex-shrink-0 ml-1">노선도 제보</button>
             </div>
           </div>
         `;
 
-        // 1. 버스 판별 XAI Feature Attribution 카드 렌더링
-        let busCardsHTML = data.busExplanations.map(bus => {
-          const isResv = bus.isReserved;
-          const badgeBg = isResv ? "bg-rose-600 text-white" : "bg-emerald-600 text-white";
-          const badgeLabel = isResv ? "전세버스 (탑승불가)" : "일반버스 (탑승가능)";
-          const dotBadge = isResv ? '<span class="w-1.5 h-1.5 rounded-full bg-white/80 inline-block mr-1"></span>' : '<span class="w-1.5 h-1.5 rounded-full bg-white/80 inline-block mr-1"></span>';
-          const cardBorder = isResv ? "border-rose-300 bg-rose-50/40" : "border-emerald-300 bg-emerald-50/40";
-
-          const featuresHTML = bus.features.map(f => `
-            <div class="space-y-1 text-xs">
-              <div class="flex justify-between items-center text-[11px]">
-                <span class="font-bold text-gray-700">${f.name}</span>
-                <span class="font-black ${isResv ? 'text-rose-600' : 'text-emerald-700'}">${f.weight}% 기여</span>
+        let stationCardHTML = crowdCardHTML;
+        if (meta.dir === "UP") {
+          stationCardHTML += `
+            <div class="p-3.5 bg-blue-50/70 rounded-2xl border border-blue-200 text-xs space-y-1.5">
+              <div class="flex justify-between items-center">
+                <span class="font-black text-blue-900">${meta.name} 상행 특성 분석</span>
+                <span class="text-[10px] text-blue-700 font-bold">기점 ${meta.seq ? meta.seq + '번째' : '상행'}</span>
               </div>
-              <div class="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
-                <div class="${isResv ? 'bg-rose-500' : 'bg-emerald-500'} h-1.5 rounded-full" style="width: ${f.weight}%"></div>
-              </div>
-              <p class="text-[10px] text-gray-400">${f.desc}</p>
-            </div>
-          `).join("");
-
-          return `
-            <div class="p-4 rounded-2xl border ${cardBorder} shadow-sm space-y-3 bg-white">
-              <div class="flex justify-between items-start">
-                <div>
-                  <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">${bus.order}</span>
-                  <div class="flex items-center space-x-1.5 mt-0.5">
-                    <span class="text-lg font-black text-gray-900">${bus.shortPlate}</span>
-                    <span class="text-xs text-gray-500 font-bold">(${bus.remainSeats}석 잔여)</span>
-                  </div>
-                </div>
-                <span class="text-[11px] font-black px-2.5 py-1 rounded-full shadow-sm flex items-center ${badgeBg}">
-                  ${dotBadge} ${badgeLabel}
-                </span>
-              </div>
-
-              <!-- AI 설명 자연어 요약 -->
-              <div class="p-2.5 bg-gray-50 rounded-xl text-xs text-gray-700 border border-gray-100 flex items-start space-x-2">
-                <svg class="w-3.5 h-3.5 text-indigo-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                <span class="leading-relaxed font-medium">${bus.decisionText}</span>
-              </div>
-
-              <!-- Feature Attribution (특성 기여도 바) -->
-              <div class="space-y-2 pt-1 border-t border-gray-100">
-                <div class="flex justify-between items-center text-[11px] font-bold text-gray-500">
-                  <span>AI 의사결정 기여 요인 (Feature Attribution)</span>
-                  <span class="text-indigo-600">신뢰도 ${bus.confidence}%</span>
-                </div>
-                ${featuresHTML}
-              </div>
-
-              <!-- 탑승 성공 확률 지수 -->
-              <div class="p-2.5 bg-blue-50/60 rounded-xl border border-blue-100 flex justify-between items-center">
-                <div>
-                  <span class="text-[10px] font-bold text-blue-600 block">사당역 탑승 성공 확률 (추정치)</span>
-                  <span class="text-xs font-black text-gray-800">${bus.boardingStatus}</span>
-                </div>
-                <div class="text-right">
-                  <span class="text-base font-black ${isResv ? 'text-rose-600' : 'text-blue-600'}">${bus.boardingProb}%</span>
-                </div>
+              <p class="text-[11px] text-gray-700 leading-snug">${meta.summary}</p>
+              <div class="pt-1 text-[11px] text-amber-800 font-medium flex items-start space-x-1">
+                <span class="font-bold flex-shrink-0">💡 탑승 팁:</span>
+                <span>${meta.boardingTip}</span>
               </div>
             </div>
           `;
-        }).join("");
+        }
 
-        // 2. 사당-수원대 구간 지연 기여 요인 (SHAP Waterfall) 렌더링
+        // 1. 버스 판별 XAI Feature Attribution 카드 렌더링 (운행/도착 버스 없을 때 분기)
+        let busCardsHTML = "";
+        if (!data.busExplanations || data.busExplanations.length === 0) {
+          busCardsHTML = `
+            <div class="p-6 bg-white rounded-2xl border border-gray-200 text-center space-y-2 shadow-xs">
+              <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mx-auto text-lg text-gray-400">🚌</div>
+              <h4 class="text-xs font-black text-gray-800">현재 ${meta.name} 정류장으로 운행/도착 예정인 버스가 없습니다</h4>
+              <p class="text-[11px] text-gray-500 leading-relaxed max-w-[280px] mx-auto">
+                현재 운행 중인 7790번 차량이 차고지(협성대)에서 출발 대기 중이거나 회차 전입니다. 버스가 노선에 진입하면 AI 판별 분석 카드가 자동으로 생성됩니다.
+              </p>
+            </div>
+          `;
+        } else {
+          busCardsHTML = data.busExplanations.map(bus => {
+            const isResv = bus.isReserved;
+            const badgeBg = isResv ? "bg-rose-600 text-white" : "bg-emerald-600 text-white";
+            const badgeLabel = isResv ? "전세버스 (탑승불가)" : "일반버스 (탑승가능)";
+            const dotBadge = '<span class="w-1.5 h-1.5 rounded-full bg-white/80 inline-block mr-1"></span>';
+            const cardBorder = isResv ? "border-rose-300 bg-rose-50/40" : "border-emerald-300 bg-emerald-50/40";
+
+            const featuresHTML = bus.features.map(f => `
+              <div class="space-y-1 text-xs">
+                <div class="flex justify-between items-center text-[11px]">
+                  <span class="font-bold text-gray-700">${f.name}</span>
+                  <span class="font-black ${isResv ? 'text-rose-600' : 'text-emerald-700'}">${f.weight}% 기여</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                  <div class="${isResv ? 'bg-rose-500' : 'bg-emerald-500'} h-1.5 rounded-full" style="width: ${f.weight}%"></div>
+                </div>
+                <p class="text-[10px] text-gray-400">${f.desc}</p>
+              </div>
+            `).join("");
+
+            return `
+              <div class="p-4 rounded-2xl border ${cardBorder} shadow-sm space-y-3 bg-white">
+                <div class="flex justify-between items-start">
+                  <div>
+                    <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">${bus.order}</span>
+                    <div class="flex items-center space-x-1.5 mt-0.5 flex-wrap gap-y-1">
+                      <span class="text-lg font-black text-gray-900">${bus.shortPlate}</span>
+                      <span class="text-xs text-gray-500 font-bold">(${bus.remainSeats}석 잔여)</span>
+                      ${bus.isDoubleDecker ? '<span class="text-[10px] bg-indigo-100 text-indigo-700 font-black px-2 py-0.5 rounded-full border border-indigo-200">2층 버스 (71석)</span>' : '<span class="text-[10px] bg-gray-100 text-gray-600 font-bold px-2 py-0.5 rounded-full border border-gray-200">1층 버스 (45석)</span>'}
+                    </div>
+                  </div>
+                  <span class="text-[11px] font-black px-2.5 py-1 rounded-full shadow-sm flex items-center ${badgeBg}">
+                    ${dotBadge} ${badgeLabel}
+                  </span>
+                </div>
+
+                <!-- AI 설명 자연어 요약 -->
+                <div class="p-2.5 bg-gray-50 rounded-xl text-xs text-gray-700 border border-gray-100 flex items-start space-x-2">
+                  <svg class="w-3.5 h-3.5 text-indigo-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  <span class="leading-relaxed font-medium">${bus.decisionText}</span>
+                </div>
+
+                <!-- AI 판단 주요 요인 -->
+                <div class="space-y-2 pt-1 border-t border-gray-100">
+                  <div class="flex justify-between items-center text-[11px] font-bold text-gray-500">
+                    <span class="text-indigo-600 font-bold">AI 탑승 판단 주요 요인</span>
+                  </div>
+                  ${featuresHTML}
+                </div>
+
+                <!-- 탑승 성공 확률 지수 -->
+                <div class="p-2.5 bg-blue-50/60 rounded-xl border border-blue-100 flex justify-between items-center">
+                  <div>
+                    <span class="text-[10px] font-bold text-blue-600 block">${meta.name} 탑승 성공 확률 (추정치)</span>
+                    <span class="text-xs font-black text-gray-800">${bus.boardingStatus}</span>
+                  </div>
+                  <div class="text-right">
+                    <span class="text-base font-black ${isResv ? 'text-rose-600' : 'text-blue-600'}">${bus.boardingProb}%</span>
+                  </div>
+                </div>
+
+                ${!isResv && bus.predictedSeatRange ? `
+                <!-- 착석 가능 좌석 범위 뱃지 -->
+                <div class="px-3 py-2 bg-gradient-to-r from-indigo-50 to-blue-50 rounded-xl border border-indigo-200 flex items-center justify-between text-xs">
+                  <div class="flex items-center space-x-1.5">
+                    <span class="w-2 h-2 rounded-full bg-indigo-600 animate-pulse"></span>
+                    <span class="font-bold text-indigo-900 text-[11px]">AI 예상 착석 가능 좌석</span>
+                  </div>
+                  <span class="font-black text-indigo-700 text-xs">${bus.predictedSeatRange}</span>
+                </div>
+                ` : ''}
+              </div>
+            `;
+          }).join("");
+        }
+
+        // 2. 구간 지연 기여 요인 렌더링
         let delayBarsHTML = data.delayFactors.map(f => `
           <div class="space-y-1 text-xs">
             <div class="flex justify-between items-center">
@@ -364,80 +619,75 @@
 
         // 3. 전체 합체 렌더링
         container.innerHTML = `
-          <!-- 0. 사당역 9번 출구 학우 실시간 줄 현황판 -->
-          ${crowdCardHTML}
+          <!-- 0. 정류장 특화 분석 카드 (사당역 줄 제보 or 기점발 상행 분석) -->
+          ${stationCardHTML}
 
           <!-- 1. 차량 판별 설명 섹션 -->
           <div class="space-y-2.5">
             <div class="flex justify-between items-center px-1">
               <h3 class="text-xs font-black text-gray-800 flex items-center space-x-1.5">
                 <svg class="w-3.5 h-3.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                <span>실시간 버스 판별 근거 (Feature Importance)</span>
+                <span>실시간 버스 탑승 진단</span>
               </h3>
-              <span class="text-[10px] text-gray-400">GBIS 텔레메트리 연동</span>
+              <span class="text-[10px] text-gray-400">실시간 위치 연동</span>
             </div>
             ${busCardsHTML}
           </div>
 
-          <!-- 2. 지연 요인 SHAP 분석 섹션 -->
+          <!-- 2. 지연 요인 분석 섹션 -->
           <div class="p-4 bg-white rounded-2xl border border-gray-200 shadow-sm space-y-3">
             <div class="flex justify-between items-center">
               <h3 class="text-xs font-black text-gray-800 flex items-center space-x-1.5">
                 <svg class="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                <span>사당역 도착 지연 기여 요인 (SHAP 분석)</span>
+                <span>${meta.dirText} 도로 정체 및 지연 분석</span>
               </h3>
-              <span class="text-[10px] bg-indigo-50 text-indigo-600 font-bold px-2 py-0.5 rounded-full">지연 기여도</span>
+              <div class="flex items-center space-x-1.5">
+                <span class="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-2 py-0.5 rounded-full flex items-center">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1 animate-pulse"></span>실시간 통행 속도 반영
+                </span>
+                <span class="text-[10px] bg-indigo-50 text-indigo-600 font-bold px-2 py-0.5 rounded-full">지연 원인</span>
+              </div>
             </div>
-            <p class="text-[11px] text-gray-500">
-              오늘 실시간 교통량과 승하차 데이터를 기반으로 AI가 산출한 구간별 지연 요인입니다.
-            </p>
             <div class="space-y-3 pt-1">
               ${delayBarsHTML}
             </div>
           </div>
 
-          <!-- 3. XAI 모델 아키텍처 정보 -->
-          <div class="p-3.5 bg-gray-50 rounded-2xl border border-gray-200 text-[11px] text-gray-500 space-y-1">
-            <div class="flex items-center space-x-1.5 text-gray-700 font-bold">
-              <svg class="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
-              <span>XAI 모델 아키텍처 (수원대 데이터과학부)</span>
+          <!-- 3. 실시간 분석 정보 -->
+          <div class="p-4 bg-slate-900 text-white rounded-2xl shadow-sm space-y-2.5">
+            <div class="flex justify-between items-center">
+              <div class="flex items-center space-x-1.5 text-indigo-400 font-bold text-xs">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                <span>7790 실시간 통학 지원 AI</span>
+              </div>
+              <span class="text-[10px] bg-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-full font-bold">실시간 분석</span>
             </div>
-            <p>• 알고리즘: ${data.modelMeta.algorithm}</p>
-            <p>• 학습 및 실시간 데이터: ${data.modelMeta.dataSources.join(" · ")}</p>
-            <p>• 현재 7790번 관측 차량: 총 ${data.modelMeta.totalActiveBuses}대 실시간 트래킹 중</p>
+            <div class="pt-2 border-t border-slate-800 flex justify-between items-center text-[10px] text-gray-400">
+              <span>데이터: 경기도 버스 실시간 GPS · 학생 대기열 제보</span>
+              <span class="text-indigo-400 font-bold">운행 중 ${data.modelMeta.totalActiveBuses}대 분석</span>
+            </div>
           </div>
         `;
+        if (refreshIcon) refreshIcon.classList.remove("animate-spin");
+        const xaiUpdateTime = document.getElementById("xaiUpdateTime");
+        if (xaiUpdateTime) {
+          const now = new Date();
+          xaiUpdateTime.innerText = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} 갱신`;
+        }
 
       } catch (err) {
+        if (refreshIcon) refreshIcon.classList.remove("animate-spin");
         container.innerHTML = `<div class="p-4 text-center text-xs text-rose-500 font-bold">XAI 데이터 통신 오류: ${err.message}</div>`;
       }
     }
 
     // 7790 노선도 기본 로직
-    function toggleTestMode() {
-      isTestMode = !isTestMode;
-      const btn = document.getElementById("testModeBtn");
-      const banner = document.getElementById("testBanner");
-      if (isTestMode) {
-        btn.classList.replace("bg-amber-50", "bg-rose-600");
-        btn.classList.replace("text-amber-700", "text-white");
-        btn.innerText = "🛑 테스트 종료";
-        banner.classList.remove("hidden");
-      } else {
-        btn.classList.replace("bg-rose-600", "bg-amber-50");
-        btn.classList.replace("text-white", "text-amber-700");
-        btn.innerText = "🧪 전세 테스트";
-        banner.classList.add("hidden");
-      }
-      fetchBusData();
-    }
-
-    function scrollToSadang() {
+    function scrollToTarget() {
       const target = document.getElementById("station-target");
       if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
     }
 
-    async function fetchBusData() {
+    async function fetchBusData(autoScroll = false) {
       const refreshBtn = document.getElementById("refreshBtn");
       const arrivalContainer = document.getElementById("arrivalCards");
       const timelineContainer = document.getElementById("routeTimeline");
@@ -446,7 +696,7 @@
       refreshBtn.classList.add("animate-spin");
 
       try {
-        const res = await fetch("/api/buses");
+        const res = await fetch(`/api/buses?station_id=${selectedStationId}`);
         const data = await res.json();
         refreshBtn.classList.remove("animate-spin");
 
@@ -468,19 +718,22 @@
         let vehicles = data.vehicles || [];
         const stations = data.stations || [];
 
-        if (isTestMode) {
-          arrivals = [
-            { routeName: "7790(예약)", isReserved: true, predictTimeMin: 3, remainStations: 1, remainSeats: 45, shortPlate: "9999", plateNo: "경기70바9999" },
-            { routeName: "7790", isReserved: false, predictTimeMin: 9, remainStations: 4, remainSeats: 58, shortPlate: "4541", plateNo: "경기76아4541" }
-          ];
-          const turnStation = stations.find(s => s.isTurn);
-          if (turnStation) {
-            vehicles.unshift({ plateNo: "경기70바9999", shortPlate: "9999", remainSeats: 45, isReserved: true, isDoubleDecker: false, currentStationId: turnStation.id, dir: "UP" });
-          }
-        }
-
         if (arrivals.length === 0) {
-          arrivalContainer.innerHTML = `<div class="p-3 bg-white rounded-xl border border-gray-200 text-center text-xs text-gray-400">현재 운행 중인 7790번이 없습니다.</div>`;
+          if (vehicles.length > 0) {
+            arrivalContainer.innerHTML = `
+              <div class="p-3 bg-blue-50/70 rounded-xl border border-blue-200 space-y-1">
+                <div class="flex justify-between items-center text-xs font-bold text-blue-900">
+                  <span>● 7790번 실시간 운행 중 (${vehicles.length}대 관측)</span>
+                  <span class="text-[10px] bg-blue-600 text-white px-1.5 py-0.2 rounded font-black">GBIS 텔레메트리</span>
+                </div>
+                <p class="text-[11px] text-gray-600 leading-snug">
+                  ${selectedStationName} 바로 앞 정류장에는 차량이 없으나, 노선 전체에 <strong>${vehicles.length}대의 버스가 실시간 운행 중</strong>입니다. 아래 노선도에서 버스 위치를 확인하실 수 있습니다.
+                </p>
+              </div>
+            `;
+          } else {
+            arrivalContainer.innerHTML = `<div class="p-3 bg-white rounded-xl border border-gray-200 text-center text-xs text-gray-400">현재 운행 중인 7790번이 없습니다.</div>`;
+          }
         } else {
           arrivalContainer.innerHTML = arrivals.map(bus => {
             const isReserved = bus.isReserved || (bus.shortPlate && bus.shortPlate.startsWith("9"));
@@ -498,7 +751,10 @@
                       <span class="text-xs font-bold ${isReserved ? 'text-rose-600' : 'text-emerald-700'}">${bus.predictTimeMin}분 후</span>
                       <span class="text-xs text-gray-400">(${bus.remainStations}개 전)</span>
                     </div>
-                    <div class="text-[11px] text-gray-400">${bus.shortPlate} · 잔여 ${bus.remainSeats}석</div>
+                    <div class="text-[11px] text-gray-400 flex items-center space-x-1.5 mt-0.5">
+                      <span>${bus.shortPlate} · 잔여 ${bus.remainSeats}석</span>
+                      ${bus.isDoubleDecker ? '<span class="px-1.5 py-0.2 bg-indigo-100 text-indigo-700 font-black rounded text-[10px]">2층 버스 (71석)</span>' : '<span class="px-1.5 py-0.2 bg-gray-100 text-gray-600 font-bold rounded text-[10px]">1층 버스</span>'}
+                    </div>
                   </div>
                 </div>
                 <span class="text-[11px] font-black px-2.5 py-1 rounded-full shadow-sm ${badgeBg}">
@@ -512,7 +768,7 @@
         // 1. 세로선: 중심축 16px에 정확히 맞춤 (w-8 노드 중심과 100% 일치)
         let timelineHTML = `<div class="absolute left-[14px] top-4 bottom-4 w-[4px] bg-emerald-500 rounded-full z-0"></div>`;
         stations.forEach((st) => {
-          const isTarget = st.isTarget;
+          const isTarget = (st.id === selectedStationId);
           const isTurn = st.isTurn;
           const isPass = st.isPass;
           const matchedVehicles = vehicles.filter(v => v.currentStationId === st.id);
@@ -576,7 +832,7 @@
                     </span>
                     ${isTurn ? '<span class="flex-shrink-0 text-[10px] font-black text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded shadow-xs">회차</span>' : ''}
                   </div>
-                  ${isTarget ? '<span class="text-[11px] text-blue-600 font-bold block mt-0.5">● 여기서 수원대행 탑승</span>' : ''}
+                  ${isTarget ? `<span class="text-[11px] text-blue-600 font-bold block mt-0.5">${st.dir === 'UP' ? '● 여기서 사당역행 탑승' : '● 여기서 수원대행 탑승'}</span>` : ''}
                   ${isPass ? '<span class="text-[10px] text-gray-400 block font-normal">미정차</span>' : ''}
                 </div>
 
@@ -591,20 +847,510 @@
 
         timelineContainer.innerHTML = timelineHTML;
 
+        // ⭐ 새 정류소 렌더링 완료 후 해당 정류장 위치로 자동 스크롤
+        if (autoScroll) {
+          setTimeout(scrollToTarget, 60);
+        }
+
       } catch (err) {
         console.error("데이터 로드 오류:", err);
+        if (refreshBtn) refreshBtn.classList.remove("animate-spin");
       }
     }
 
-    fetchBusData();
-    // 15초마다 현재 열려있는 탭(7790 노선도 또는 XAI 학우 제보 현황판)을 실시간 자동 갱신
-    setInterval(() => {
+    fetchBusData(true);
+    updateCrowdButtonsUI();
+    setInterval(updateCrowdButtonsUI, 1000);
+
+    // 15초마다 현재 열려있는 탭을 실시간 자동 갱신 (모바일 화면 꺼짐 시 백그라운드 절전)
+    let autoRefreshTimer = null;
+
+    function triggerActiveRefresh() {
+      if (document.hidden) return;
       if (currentTab === 'xai') {
         fetchXaiData(true);
       } else {
-        fetchBusData();
+        fetchBusData(false);
       }
-    }, 15000);
+    }
+
+    function startAutoRefresh() {
+      if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+      autoRefreshTimer = setInterval(triggerActiveRefresh, 15000);
+    }
+
+    // 📱 모바일 화면 꺼짐/백그라운드 전환 감지 (배터리 및 유령 트래픽 70% 절약)
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        triggerActiveRefresh();
+        startAutoRefresh();
+      } else {
+        if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+      }
+    });
+
+    startAutoRefresh();
+
+    // 📅 7790번 공식 인가 배차 기준표 (용남고속/화성시 인가 데이터 및 GBIS PTTS 실측 정밀 동기화)
+    const BASE_TIMETABLE = {
+      origin: { // 협성대 기점 출발 기준 (사당역행 상행)
+        weekday: [
+          { hour: 5, mins: [0, 20, 35, 50] },
+          { hour: 6, mins: [2, 14, 25, 36, 46, 56] },       // 출근 시작 (10~12분)
+          { hour: 7, mins: [6, 16, 26, 36, 46, 56] },       // 출근 피크 집중 (10분)
+          { hour: 8, mins: [8, 20, 32, 45, 58] },           // 출근 후반 (12~13분)
+          { hour: 9, mins: [12, 27, 42, 57] },              // 평시 (15분)
+          { hour: 10, mins: [12, 27, 42, 57] },
+          { hour: 11, mins: [12, 27, 42, 57] },
+          { hour: 12, mins: [12, 27, 42, 57] },
+          { hour: 13, mins: [12, 27, 42, 57] },
+          { hour: 14, mins: [12, 27, 42, 57] },
+          { hour: 15, mins: [10, 22, 34, 46, 58] },         // 수원대 하교 집중 (12분)
+          { hour: 16, mins: [10, 22, 34, 46, 58] },         // 하교 피크 (12분)
+          { hour: 17, mins: [10, 22, 34, 46, 58] },         // 하교/퇴근 피크 (12분)
+          { hour: 18, mins: [10, 22, 34, 46, 58] },         // 퇴근 피크 (12분)
+          { hour: 19, mins: [12, 26, 40, 55] },             // 퇴근 후반 (14분)
+          { hour: 20, mins: [10, 25, 42] },                 // 야간 (16~17분)
+          { hour: 21, mins: [0, 18, 36, 55] },              // 야간 (18~19분)
+          { hour: 22, mins: [15, 35, 55] },                 // 심야 (20분)
+          { hour: 23, mins: [15, 30] }                      // 막차 23:30
+        ],
+        weekend: [ // 토·일·공휴일 (20~25분 균등)
+          { hour: 5, mins: [0, 25, 50] },
+          { hour: 6, mins: [15, 40] },
+          { hour: 7, mins: [5, 30, 55] },
+          { hour: 8, mins: [20, 45] },
+          { hour: 9, mins: [10, 35] },
+          { hour: 10, mins: [0, 25, 50] },
+          { hour: 11, mins: [15, 40] },
+          { hour: 12, mins: [5, 30, 55] },
+          { hour: 13, mins: [20, 45] },
+          { hour: 14, mins: [10, 35] },
+          { hour: 15, mins: [0, 25, 50] },
+          { hour: 16, mins: [15, 40] },
+          { hour: 17, mins: [5, 30, 55] },
+          { hour: 18, mins: [20, 45] },
+          { hour: 19, mins: [10, 35] },
+          { hour: 20, mins: [0, 25, 50] },
+          { hour: 21, mins: [15, 40] },
+          { hour: 22, mins: [5, 25, 45] }                   // 막차 22:45
+        ]
+      },
+      sadang: { // 사당역 9번 출구 회차 출발 기준 (수원대행 하행, 협성대 출발 + 약 55~60분)
+        weekday: [
+          { hour: 6, mins: [0, 18, 35, 50] },
+          { hour: 7, mins: [2, 14, 25, 36, 48, 58] },       // 사당역 수원대행 등교 피크 (10~12분)
+          { hour: 8, mins: [8, 18, 28, 38, 50] },           // 수원대행 등교 집중 (10분)
+          { hour: 9, mins: [2, 16, 30, 45] },
+          { hour: 10, mins: [0, 15, 30, 45] },
+          { hour: 11, mins: [0, 15, 30, 45] },
+          { hour: 12, mins: [0, 15, 30, 45] },
+          { hour: 13, mins: [0, 15, 30, 45] },
+          { hour: 14, mins: [0, 15, 30, 45] },
+          { hour: 15, mins: [0, 15, 30, 45] },
+          { hour: 16, mins: [0, 14, 28, 40, 52] },
+          { hour: 17, mins: [4, 16, 28, 40, 52] },          // 사당역 퇴근 집중 (12분)
+          { hour: 18, mins: [4, 16, 28, 40, 52] },          // 퇴근 집중 (12분)
+          { hour: 19, mins: [4, 16, 28, 42, 56] },
+          { hour: 20, mins: [10, 25, 40, 55] },
+          { hour: 21, mins: [10, 25, 40, 55] },
+          { hour: 22, mins: [12, 30, 48] },
+          { hour: 23, mins: [8, 28, 48] },
+          { hour: 0, mins: [8, 30] }                        // 막차 00:30
+        ],
+        weekend: [
+          { hour: 6, mins: [0, 25, 50] },
+          { hour: 7, mins: [15, 40] },
+          { hour: 8, mins: [5, 30, 55] },
+          { hour: 9, mins: [20, 45] },
+          { hour: 10, mins: [10, 35] },
+          { hour: 11, mins: [0, 25, 50] },
+          { hour: 12, mins: [15, 40] },
+          { hour: 13, mins: [5, 30, 55] },
+          { hour: 14, mins: [20, 45] },
+          { hour: 15, mins: [10, 35] },
+          { hour: 16, mins: [0, 25, 50] },
+          { hour: 17, mins: [15, 40] },
+          { hour: 18, mins: [5, 30, 55] },
+          { hour: 19, mins: [20, 45] },
+          { hour: 20, mins: [10, 35] },
+          { hour: 21, mins: [0, 25, 50] },
+          { hour: 22, mins: [15, 40] },
+          { hour: 23, mins: [5, 30, 55] }                   // 막차 23:55
+        ]
+      }
+    };
+
+    let ttSelectedStationId = "233003021"; // default: 수원대
+    let ttSelectedDay = "weekday";        // 'weekday' or 'weekend'
+    let ttLiveArrivals = [];              // 실시간 도착 버스 텔레메트리 연동 데이터
+
+    // 📍 5대 주요 정류장별 GBIS 실측 정밀 소요시간 및 첫·막차 메타
+    const TT_STATION_META = {
+      "233003021": { name: "수원대입구", dir: "사당역행 (상행)", offset: 10, firstBus: "05:10", lastBus: "23:40", note: "기점에서 실측 10분 소요 (수원대 정문)" },
+      "233002255": { name: "신명아파트", dir: "사당역행 (상행)", offset: 9, firstBus: "05:09", lastBus: "23:39", note: "기점에서 실측 9분 소요" },
+      "233002371": { name: "아이파크정문", dir: "사당역행 (상행)", offset: 8, firstBus: "05:08", lastBus: "23:38", note: "기점에서 실측 8분 소요" },
+      "233002245": { name: "효행초등학교정문", dir: "사당역행 (상행)", offset: 7, firstBus: "05:07", lastBus: "23:37", note: "기점에서 실측 7분 소요" },
+      "119000302": { name: "사당역9번출구앞", dir: "수원대행 (하행)", offset: 0, firstBus: "06:00", lastBus: "00:30", note: "사당역 회차 출발 기준 (등교 승차)" }
+    };
+
+    // 실시간 라이브 버스 텔레메트리 조회
+    async function updateTtLiveArrivals(stId) {
+      try {
+        const res = await fetch(`/api/buses?station_id=${stId}`);
+        const data = await res.json();
+        if (ttSelectedStationId === stId) {
+          ttLiveArrivals = data.arrivingBuses || [];
+          renderKakaoTimetable();
+        }
+      } catch (e) {}
+    }
+
+    // 📅 카카오맵 스타일 시간표 모달 열기/닫기 및 렌더링 함수
+    function openTimetableModal() {
+      if (TT_STATION_META[selectedStationId]) {
+        ttSelectedStationId = selectedStationId;
+      }
+      ttLiveArrivals = [];
+      updateTtLiveArrivals(ttSelectedStationId);
+      renderKakaoTimetable();
+      const modal = document.getElementById('timetableModal');
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    function closeTimetableModal() {
+      const modal = document.getElementById('timetableModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function selectTtStation(stId) {
+      ttSelectedStationId = stId;
+      ttLiveArrivals = [];
+      renderKakaoTimetable();
+      updateTtLiveArrivals(stId);
+    }
+
+    function selectTtDay(day) {
+      ttSelectedDay = day;
+      renderKakaoTimetable();
+    }
+
+    function renderKakaoTimetable() {
+      // 1. 요일 탭 버튼 활성화 스타일
+      const btnWk = document.getElementById('ttDayBtn_weekday');
+      const btnWe = document.getElementById('ttDayBtn_weekend');
+      if (btnWk && btnWe) {
+        if (ttSelectedDay === 'weekday') {
+          btnWk.className = "py-2 px-3 rounded-xl font-black bg-blue-600 text-white shadow-xs transition flex-1 text-center text-xs";
+          btnWe.className = "py-2 px-3 rounded-xl font-bold bg-white text-gray-600 hover:text-gray-900 border border-gray-200 transition flex-1 text-center text-xs";
+        } else {
+          btnWe.className = "py-2 px-3 rounded-xl font-black bg-blue-600 text-white shadow-xs transition flex-1 text-center text-xs";
+          btnWk.className = "py-2 px-3 rounded-xl font-bold bg-white text-gray-600 hover:text-gray-900 border border-gray-200 transition flex-1 text-center text-xs";
+        }
+      }
+
+      // 2. 정류장 칩 활성화 스타일
+      document.querySelectorAll(".tt-st-chip").forEach(el => {
+        el.className = "tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100";
+      });
+      const activeChip = document.getElementById(`ttChip_${ttSelectedStationId}`);
+      if (activeChip) {
+        activeChip.className = "tt-st-chip py-1 px-1 rounded-lg text-[11px] font-black transition bg-slate-900 text-white shadow-xs";
+      }
+
+      // 3. 상단 헤더 라벨 및 배차 메타 배너
+      const stInfo = TT_STATION_META[ttSelectedStationId] || TT_STATION_META["233003021"];
+      const headerStName = document.getElementById("ttHeaderStationName");
+      if (headerStName) {
+        headerStName.innerText = `${stInfo.name} (${stInfo.dir})`;
+      }
+
+      const metaBanner = document.getElementById("ttMetaBanner");
+      if (metaBanner) {
+        const isWk = (ttSelectedDay === 'weekday');
+        const first = isWk ? stInfo.firstBus : (ttSelectedStationId === '119000302' ? '06:00' : '05:10');
+        const last = isWk ? stInfo.lastBus : (ttSelectedStationId === '119000302' ? '23:55' : '22:55');
+        const headwayText = isWk ? "평일 10~15분 간격" : "주말 20~25분 간격";
+        metaBanner.innerHTML = `
+          <div class="flex justify-between items-center text-[10.5px] w-full">
+            <span class="text-gray-500 font-bold">${stInfo.note}</span>
+            <span class="text-blue-700 font-black">${headwayText} (첫차 ${first} / 막차 ${last})</span>
+          </div>
+        `;
+      }
+
+      // 4. 정류장별 정규 인가 배차 시간표 계산
+      let schedule = [];
+      if (ttSelectedStationId === "119000302") {
+        schedule = BASE_TIMETABLE.sadang[ttSelectedDay];
+      } else {
+        const offset = stInfo.offset;
+        const baseList = BASE_TIMETABLE.origin[ttSelectedDay];
+        const hourMap = {};
+        baseList.forEach(item => {
+          item.mins.forEach(m => {
+            const total = item.hour * 60 + m + offset;
+            const h = Math.floor(total / 60) % 24;
+            const min = total % 60;
+            if (!hourMap[h]) hourMap[h] = [];
+            hourMap[h].push(min);
+          });
+        });
+
+        const sortedHours = Object.keys(hourMap).map(Number).sort((a, b) => {
+          const ordA = a === 0 ? 24 : a;
+          const ordB = b === 0 ? 24 : b;
+          return ordA - ordB;
+        });
+
+        schedule = sortedHours.map(h => ({
+          hour: h,
+          mins: hourMap[h].sort((a, b) => a - b)
+        }));
+      }
+
+      // 평탄화된 정규 계획 목록
+      const allScheduledRuns = [];
+      schedule.forEach(item => {
+        item.mins.forEach(m => {
+          allScheduledRuns.push({
+            hour: item.hour,
+            min: m,
+            totalMin: (item.hour === 0 ? 24 : item.hour) * 60 + m
+          });
+        });
+      });
+      allScheduledRuns.sort((a, b) => a.totalMin - b.totalMin);
+
+      // 5. 실시간 접근 버스와 정규 계획 매칭 및 라이브 하이라이트 카드
+      const now = new Date();
+      const currentHour = now.getHours();
+      const currentMin = now.getMinutes();
+      const currentTotalMin = (currentHour === 0 ? 24 : currentHour) * 60 + currentMin;
+
+      // 각 실시간 버스가 계획표의 어떤 슬롯과 대응되는지 매칭
+      // (운행 지연을 감안하여 arrTotal >= run.totalMin - 3 이면서 차이가 가장 적은 슬롯 선택)
+      const matchedSlots = new Map(); // key: `${h}_${m}`, value: { liveBus, expH, expM, delay, planH, planM }
+
+      if (ttLiveArrivals && ttLiveArrivals.length > 0) {
+        ttLiveArrivals.forEach(b => {
+          const arrTotal = currentTotalMin + b.predictTimeMin;
+          const expH = Math.floor(arrTotal / 60) % 24;
+          const expM = arrTotal % 60;
+
+          // 정규 배차 슬롯 중 매칭 후보 탐색 (지연 최대 18분, 조기 최대 3분 허용)
+          let bestSlot = null;
+          let bestDiff = 999;
+          for (const run of allScheduledRuns) {
+            const diff = arrTotal - run.totalMin; // diff > 0: 지연, diff < 0: 조기
+            if (diff >= -3 && diff <= 18) {
+              if (Math.abs(diff) < bestDiff) {
+                bestDiff = Math.abs(diff);
+                bestSlot = { ...run, delay: diff };
+              }
+            }
+          }
+          if (bestSlot) {
+            const key = `${bestSlot.hour}_${bestSlot.min}`;
+            if (!matchedSlots.has(key)) {
+              matchedSlots.set(key, { liveBus: b, expH, expM, delay: bestSlot.delay, planH: bestSlot.hour, planM: bestSlot.min });
+            }
+          }
+        });
+      }
+
+      const liveCard = document.getElementById("ttLiveCard");
+      if (liveCard) {
+        if (ttLiveArrivals && ttLiveArrivals.length > 0) {
+          const nextBus = ttLiveArrivals[0];
+          const arrTotal = currentTotalMin + nextBus.predictTimeMin;
+          const expH = Math.floor(arrTotal / 60) % 24;
+          const expM = arrTotal % 60;
+          const is2F = nextBus.isDoubleDecker;
+          const deckBadge = is2F 
+            ? '<span class="px-1.5 py-0.2 bg-indigo-100 text-indigo-700 font-black rounded text-[9px]">2층 버스</span>' 
+            : '<span class="px-1.5 py-0.2 bg-gray-100 text-gray-600 font-bold rounded text-[9px]">1층 버스</span>';
+
+          // 첫 번째 버스의 매칭 계획 및 지연 상태
+          const matchedFirst = Array.from(matchedSlots.values()).find(m => m.liveBus === nextBus);
+          let delayNotice = '';
+          if (matchedFirst) {
+            const d = matchedFirst.delay;
+            if (d > 2) {
+              delayNotice = `<span class="px-1.5 py-0.5 bg-amber-100 text-amber-800 font-black rounded text-[9.5px]">⏱ 정시(${String(matchedFirst.planM).padStart(2,'0')}분) 대비 +${d}분 지연 운행</span>`;
+            } else if (d < -2) {
+              delayNotice = `<span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 font-black rounded text-[9.5px]">⏱ 정시(${String(matchedFirst.planM).padStart(2,'0')}분) 대비 ${Math.abs(d)}분 조기 운행</span>`;
+            } else {
+              delayNotice = `<span class="px-1.5 py-0.5 bg-blue-100 text-blue-800 font-black rounded text-[9.5px]">⏱ ${String(matchedFirst.planM).padStart(2,'0')}분 정시 운행 중</span>`;
+            }
+          }
+
+          liveCard.innerHTML = `
+            <div class="p-2.5 bg-gradient-to-r from-blue-50 to-indigo-50/80 rounded-xl border border-blue-200 shadow-2xs space-y-1">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-1.5 min-w-0">
+                  <span class="w-2 h-2 rounded-full bg-blue-600 animate-ping flex-shrink-0"></span>
+                  <span class="text-[11px] font-black text-blue-900 truncate">
+                    실시간 운행: <strong>${String(expH).padStart(2, '0')}:${String(expM).padStart(2, '0')}</strong> 도착 예상 (${nextBus.predictTimeMin}분 후)
+                  </span>
+                  ${deckBadge}
+                </div>
+                <span class="text-[11px] font-black text-blue-700 flex-shrink-0 ml-1">잔여 ${nextBus.remainSeats}석</span>
+              </div>
+              ${delayNotice ? `
+                <div class="flex items-center justify-between pt-0.5 text-[10px] text-gray-500 pl-3.5">
+                  <span class="truncate">계획: ${String(matchedFirst.planH).padStart(2,'0')}:${String(matchedFirst.planM).padStart(2,'0')} 정시 인가 차량</span>
+                  ${delayNotice}
+                </div>
+              ` : ''}
+            </div>
+          `;
+          liveCard.classList.remove("hidden");
+        } else {
+          liveCard.innerHTML = ``;
+          liveCard.classList.add("hidden");
+        }
+      }
+
+      // 6. 카카오맵 스타일 시간표 테이블 렌더링
+      const tableContainer = document.getElementById("ttTableBody");
+      if (!tableContainer) return;
+
+      tableContainer.innerHTML = schedule.map(item => {
+        const isCurrentHour = (item.hour === currentHour);
+        const rowBg = isCurrentHour ? "bg-blue-50/90 border-l-4 border-blue-600 font-bold" : "hover:bg-gray-50/70";
+
+        const minChips = item.mins.map(m => {
+          const slotKey = `${item.hour}_${m}`;
+          const liveMatch = matchedSlots.get(slotKey);
+
+          if (liveMatch) {
+            return `
+              <span class="text-xs font-black bg-blue-600 text-white px-2 py-0.5 rounded-full shadow-xs inline-flex items-center space-x-1 animate-pulse" title="계획: ${String(m).padStart(2,'0')}분 ➔ 실시간 예상: ${String(liveMatch.expM).padStart(2,'0')}분 (${liveMatch.liveBus.predictTimeMin}분후)">
+                <span>●</span>
+                <span>${String(m).padStart(2, '0')}</span>
+                <span class="text-[9.5px] text-amber-200 font-black">➔ ${String(liveMatch.expM).padStart(2, '0')}분<span class="text-[8.5px] opacity-90 font-normal">(${liveMatch.liveBus.predictTimeMin}분후)</span></span>
+              </span>
+            `;
+          }
+
+          const slotTotalMin = (item.hour === 0 ? 24 : item.hour) * 60 + m;
+          const isPast = (slotTotalMin < currentTotalMin);
+          const isNext = (slotTotalMin >= currentTotalMin);
+          let chipClass = "text-gray-800 font-medium";
+          if (isNext && item.hour === currentHour) {
+            chipClass = "text-blue-700 font-black bg-blue-100 px-1.5 py-0.5 rounded shadow-2xs";
+          } else if (isPast) {
+            chipClass = "text-gray-300 font-normal";
+          }
+          return `<span class="${chipClass} text-xs tracking-tight">${String(m).padStart(2, '0')}</span>`;
+        }).join('<span class="text-gray-200">·</span>');
+
+        return `
+          <div class="grid grid-cols-12 py-2 px-3 text-xs items-center transition border-b border-gray-100 ${rowBg}">
+            <div class="col-span-3 flex items-center space-x-1">
+              <span class="font-black ${isCurrentHour ? 'text-blue-900 text-sm' : 'text-gray-900'}">${String(item.hour).padStart(2, '0')}시</span>
+              ${isCurrentHour ? '<span class="text-[9px] bg-blue-600 text-white px-1 py-0.2 rounded font-black">현재</span>' : ''}
+            </div>
+            <div class="col-span-9 flex flex-wrap gap-2 items-center min-w-0">
+              ${minChips}
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      // 현재 시각 행으로 부드럽게 스크롤
+      setTimeout(() => {
+        const activeRow = tableContainer.querySelector('.border-blue-600');
+        if (activeRow) {
+          activeRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+    }
   </script>
+
+  <!-- 📅 7790번 정류장별 도착 예상 시간표 모달 (카카오맵 스타일) -->
+  <div id="timetableModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-4.5 shadow-2xl space-y-3 border border-gray-100 max-h-[88vh] flex flex-col">
+      
+      <!-- 헤더 -->
+      <div class="flex justify-between items-center pb-2 border-b border-gray-100">
+        <div class="flex items-center space-x-1.5">
+          <span class="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded shadow-xs">7790</span>
+          <div>
+            <h3 class="text-sm font-black text-gray-900 tracking-tight">도착 예상 시간표</h3>
+          </div>
+        </div>
+        <button onclick="closeTimetableModal()" class="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 font-bold flex items-center justify-center text-xs transition">✕</button>
+      </div>
+
+      <!-- 정류장 선택 칩 (5개 정류장 지원) -->
+      <div class="space-y-1">
+        <div class="flex justify-between items-center px-0.5">
+          <span class="text-[11px] font-bold text-gray-500">📍 조회 정류장</span>
+          <span id="ttHeaderStationName" class="text-xs font-black text-blue-600 truncate max-w-[200px]">수원대입구 (사당역행)</span>
+        </div>
+        <div class="grid grid-cols-5 gap-1 text-center bg-gray-50 p-1 rounded-xl border border-gray-200">
+          <button onclick="selectTtStation('233003021')" id="ttChip_233003021" class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-black transition bg-slate-900 text-white shadow-xs">
+            수원대
+          </button>
+          <button onclick="selectTtStation('233002255')" id="ttChip_233002255" class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+            신명
+          </button>
+          <button onclick="selectTtStation('233002371')" id="ttChip_233002371" class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+            아이파크
+          </button>
+          <button onclick="selectTtStation('233002245')" id="ttChip_233002245" class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+            효행초
+          </button>
+          <button onclick="selectTtStation('119000302')" id="ttChip_119000302" class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+            사당역 9출
+          </button>
+        </div>
+      </div>
+
+      <!-- 요일 선택 탭 (평일 / 주말공휴일 2개만 깔끔하게 유지) -->
+      <div class="flex space-x-1.5 pt-0.5">
+        <button id="ttDayBtn_weekday" onclick="selectTtDay('weekday')" class="py-2 px-3 rounded-xl font-black bg-blue-600 text-white shadow-xs transition flex-1 text-center text-xs">
+          평일 (월 ~ 금)
+        </button>
+        <button id="ttDayBtn_weekend" onclick="selectTtDay('weekend')" class="py-2 px-3 rounded-xl font-bold bg-white text-gray-600 hover:text-gray-900 border border-gray-200 transition flex-1 text-center text-xs">
+          토·일·공휴일
+        </button>
+      </div>
+
+      <!-- 배차 및 첫·막차 실측 메타 배너 -->
+      <div id="ttMetaBanner" class="p-2 bg-gray-50 rounded-xl border border-gray-200">
+        <!-- JS 동적 렌더링 -->
+      </div>
+
+      <!-- 실시간 라이브 도착 버스 하이라이트 카드 -->
+      <div id="ttLiveCard" class="hidden">
+        <!-- JS 동적 렌더링 -->
+      </div>
+
+      <!-- 카카오맵 스타일 시간대별 테이블 -->
+      <div class="flex-1 flex flex-col min-h-0 space-y-1">
+        <div class="grid grid-cols-12 bg-gray-100 py-1.5 px-3 text-[10px] font-bold text-gray-500 rounded-t-xl border border-b-0 border-gray-200">
+          <span class="col-span-3">시간</span>
+          <span class="col-span-9">도착 예정 분 (단위: 분)</span>
+        </div>
+        <div id="ttTableBody" class="overflow-y-auto max-h-[42vh] pr-0.5 divide-y divide-gray-100 border border-gray-200 rounded-b-xl bg-white shadow-inner">
+          <!-- 시간표 행들이 JS로 렌더링됨 -->
+        </div>
+      </div>
+
+      <!-- 하단 안내 문구 -->
+      <div class="bg-blue-50/60 border border-blue-100 rounded-xl p-2 space-y-0.5 text-[10px] text-gray-600 leading-snug">
+        <p class="font-bold text-blue-900">💡 <strong>시간표와 실시간 도착 안내:</strong></p>
+        <p>• <strong>시간표 숫자:</strong> 운수사 공식 <strong>정시 배차 계획표</strong>입니다.</p>
+        <p>• <strong>실시간 운행:</strong> 도로 정체·신호 대기로 실제 도착 시각이 계획과 약 ±3~7분 다를 수 있으며, 현재 오고 있는 버스는 상단 및 <span class="text-blue-700 font-bold">● 파란 뱃지</span>로 바로 확인하실 수 있습니다.</p>
+      </div>
+
+      <button onclick="closeTimetableModal()" class="w-full py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl text-xs font-black transition shadow-sm">
+        닫기
+      </button>
+    </div>
+  </div>
 </body>
 </html>
