@@ -585,25 +585,21 @@
                   ${featuresHTML}
                 </div>
 
-                <!-- 탑승 성공 확률 지수 -->
-                <div class="p-2.5 bg-blue-50/60 rounded-xl border border-blue-100 flex justify-between items-center">
-                  <div>
-                    <span class="text-[10px] font-bold text-blue-600 block">${meta.name} 탑승 성공 확률 (추정치)</span>
-                    <span class="text-xs font-black text-gray-800">${bus.boardingStatus}</span>
-                  </div>
-                  <div class="text-right">
-                    <span class="text-base font-black ${isResv ? 'text-rose-600' : 'text-blue-600'}">${bus.boardingProb}%</span>
-                  </div>
-                </div>
-
                 ${!isResv && bus.predictedSeatRange ? `
-                <!-- 착석 가능 좌석 범위 뱃지 -->
+                <!-- AI 예상 착석 가능 좌석 뱃지 -->
                 <div class="px-3 py-2 bg-gradient-to-r from-indigo-50 to-blue-50 rounded-xl border border-indigo-200 flex items-center justify-between text-xs">
                   <div class="flex items-center space-x-1.5">
                     <span class="w-2 h-2 rounded-full bg-indigo-600 animate-pulse"></span>
                     <span class="font-bold text-indigo-900 text-[11px]">AI 예상 착석 가능 좌석</span>
                   </div>
                   <span class="font-black text-indigo-700 text-xs">${bus.predictedSeatRange}</span>
+                </div>
+                ` : ''}
+
+                ${isResv ? `
+                <!-- 전세버스 탑승 불가 경고 -->
+                <div class="p-2.5 bg-rose-50 rounded-xl border border-rose-200 flex justify-between items-center">
+                  <span class="text-xs font-black text-rose-800">🔴 전세버스로 일반 학생은 탑승할 수 없습니다.</span>
                 </div>
                 ` : ''}
               </div>

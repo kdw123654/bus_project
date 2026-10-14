@@ -737,7 +737,7 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                     delta = 2
                     tft_crowd_weight = 58
                     crowd_desc = "협성대 기점 직후로 빈 차 진입, 전 좌석 여유"
-                    decision_text = f"기점 극초반 정류장으로 차량('{plate}')의 잔여 {seats}석이 확보되어 99% 확률로 여유로운 착석 탑승이 가능합니다."
+                    decision_text = f"기점 극초반 정류장으로 차량('{plate}')의 잔여 {seats}석이 확보되어 여유로운 착석 탑승이 가능합니다."
 
                 elif station_id == "233002371":  # 아이파크정문 (기점 12번째)
                     boarding_prob = 98 if effective_seats >= 20 else 88
@@ -747,7 +747,7 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                     delta = 3
                     tft_crowd_weight = 52
                     crowd_desc = "기점 12번째 정류장으로 좌석 안정성 우수"
-                    decision_text = f"기점 출발 초기 구간으로 차량('{plate}')의 실질 잔여 {effective_seats}석이 충분하여 98% 확률로 안정적인 착석이 예상됩니다."
+                    decision_text = f"기점 출발 초기 구간으로 차량('{plate}')의 실질 잔여 약 {effective_seats}석이 여유 있게 진입할 것으로 예상됩니다."
 
                 elif station_id == "233002255":  # 신명아파트 (기점 14번째)
                     if upstream_notices:
@@ -774,7 +774,7 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                         est_waiters = 8 if not is_afternoon_rush else 10
                         delta = 3
                     tft_crowd_weight = 46
-                    decision_text = f"신명아파트 구간 차량('{plate}') 실질 잔여 {effective_seats}석이며 착석 확률이 {boarding_prob}%로 분석되었습니다."
+                    decision_text = f"신명아파트 구간 차량('{plate}')은 앞 정류장 승차를 감안하여 실질 약 {effective_seats}석이 진입할 것으로 예상됩니다."
 
                 else:  # 수원대입구 (233003021, 기점 16번째 - 학생 하교 최다 정류장)
                     if is_afternoon_rush:
@@ -816,7 +816,7 @@ def get_xai_analysis(station_id: str = Query("119000302")):
 
                     crowd_desc = f"앞 정류장 승차 반영: {stgnn_tag} ➔ 수원대 진입 시 실질 {effective_seats}석 남음"
                     tft_crowd_weight = 48
-                    decision_text = f"차량('{plate}')은 현재 {seats}석이나 앞선 정류장 승차를 감안하면 수원대 도착 시 실질 {effective_seats}석이 남게 됩니다. 착석 확률은 {boarding_prob}%입니다."
+                    decision_text = f"차량('{plate}')은 현재 {seats}석이나 앞선 정류장 승차를 감안하면 수원대 도착 시 실질 약 {effective_seats}석이 남을 것으로 예상됩니다. (본인 대기 순번에 유의하세요)"
 
             # 95% 착석 신뢰구간 수학적 계산 (실질 잔여좌석 기준)
             eval_seats = effective_seats if not is_down else seats
