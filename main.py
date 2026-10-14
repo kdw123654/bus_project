@@ -298,10 +298,15 @@ def save_crowd_data_to_disk():
         now = time.time()
         clean_reports = {}
         for st_id, r_list in CROWD_REPORTS_BY_STATION.items():
-            valid = [r for r in r_list if now - r["time"] < 300]
+            valid = [r for r in r_list if now - r["time"] < 600]
             if valid:
                 clean_reports[st_id] = valid
-        clean_ips = {ip: t for ip, t in CROWD_REPORT_IP_COOLDOWN.items() if now - t < 300}
+        clean_ips = {}
+        for ip, record in CROWD_REPORT_IP_COOLDOWN.items():
+            t = record.get("time", 0) if isinstance(record, dict) else record
+            dur = record.get("duration", 600) if isinstance(record, dict) else 600
+            if now - t < dur:
+                clean_ips[ip] = record
         with open(CROWD_DATA_FILE, "w", encoding="utf-8") as f:
             json.dump({"reports": clean_reports, "ips": clean_ips}, f)
     except Exception as e:
@@ -316,11 +321,17 @@ def load_crowd_data_from_disk():
             now = time.time()
             clean_reports = {}
             for st_id, r_list in data.get("reports", {}).items():
-                valid = [r for r in r_list if now - r["time"] < 300]
+                valid = [r for r in r_list if now - r["time"] < 600]
                 if valid:
                     clean_reports[st_id] = valid
             CROWD_REPORTS_BY_STATION = clean_reports
-            CROWD_REPORT_IP_COOLDOWN = {ip: t for ip, t in data.get("ips", {}).items() if now - t < 300}
+            clean_ips = {}
+            for ip, record in data.get("ips", {}).items():
+                t = record.get("time", 0) if isinstance(record, dict) else record
+                dur = record.get("duration", 600) if isinstance(record, dict) else 600
+                if now - t < dur:
+                    clean_ips[ip] = record
+            CROWD_REPORT_IP_COOLDOWN = clean_ips
             print(f"[OK] 제보 데이터 {sum(len(v) for v in clean_reports.values())}건 디스크 복원 완료!")
     except Exception as e:
         print(f"제보 데이터 디스크 복원 오류: {e}")
@@ -331,51 +342,153 @@ def report_crowd(
     status: str = Query(..., description="여유(smooth), 보통(moderate), 포화(crowded)"),
     station_id: str = Query("119000302", description="제보 정류장 ID")
 ):
-    """정류장별 학우들의 1초 원터치 줄 상태 제보 저장 API (5분 쿨다운 및 도배 방지, 디스크 영구보존)"""
+    """정류장별 학우들의 1초 원터치 줄 상태 제보 저장 API (도착 버스 연동 동적 쿨다운 최대 10분, 디스크 영구보존)"""
     import time
     now = time.time()
-    
-    # 5분(300초) 프록시 대응 실제 IP 기반 도배 방지
+    global CROWD_REPORTS_BY_STATION, CROWD_REPORT_IP_COOLDOWN, CACHE_BUS_ARRIVALS, CACHE_XAI_ANALYSIS
+
+    # 1. 제보 등록 시점 해당 정류장 첫 번째 도착 예정 버스 정보 조회
+    target_bus_plate = ""
+    target_eta_min = 5
+    cached = CACHE_BUS_ARRIVALS.get(station_id)
+    if cached and cached.get("data"):
+        arrs = cached["data"].get("arrivingBuses", [])
+        if arrs:
+            target_bus_plate = arrs[0].get("shortPlate", "")
+            target_eta_min = arrs[0].get("predictTimeMin", 5)
+
+    # ⭐ 학우 요청 반영: 첫 번째 도착 예정 버스 잔여시간 연동 동적 쿨다운
+    # - 최소 2분 (120초): 버스가 0~1분 전이어도 연타 도배 방지
+    # - 최대 10분 (600초): 학우 요청 최대 10분 상한선 설정
+    if target_eta_min <= 1:
+        dynamic_cooldown = 120  # 2분 (다음 버스 대기열 제보 준비)
+    else:
+        dynamic_cooldown = max(120, min(target_eta_min * 60, 600))  # 최대 10분(600초)
+
+    # 2. IP 기반 개인별 도배 방지 쿨다운 검사
     client_ip = get_real_client_ip(request)
-    last_time = CROWD_REPORT_IP_COOLDOWN.get(client_ip, 0)
-    remain = int(300 - (now - last_time))
+    last_record = CROWD_REPORT_IP_COOLDOWN.get(client_ip)
+    if isinstance(last_record, dict):
+        last_time = last_record.get("time", 0)
+        cooldown_duration = last_record.get("duration", 300)
+    elif isinstance(last_record, (int, float)):
+        last_time = last_record
+        cooldown_duration = 300
+    else:
+        last_time = 0
+        cooldown_duration = 300
+
+    remain = int(cooldown_duration - (now - last_time))
     if remain > 0:
+        remain_min = remain // 60
+        remain_sec = remain % 60
+        time_msg = f"{remain_min}분 {remain_sec}초" if remain_min > 0 else f"{remain_sec}초"
         return {
             "success": False,
-            "message": f"도배 방지를 위해 5분에 1회만 제보 가능합니다. ({remain}초 후 가능)",
+            "message": f"도배 방지 및 도착 주기 연동으로 {time_msg} 후 다시 제보 가능합니다.",
             "remainCooldown": remain
         }
-    global CROWD_REPORTS_BY_STATION
+
     if station_id not in CROWD_REPORTS_BY_STATION:
         CROWD_REPORTS_BY_STATION[station_id] = []
-    
-    # 최근 5분 이내 제보만 유지
-    CROWD_REPORTS_BY_STATION[station_id] = [r for r in CROWD_REPORTS_BY_STATION[station_id] if now - r["time"] < 300]
-    CROWD_REPORTS_BY_STATION[station_id].append({"status": status, "time": now})
-    CROWD_REPORT_IP_COOLDOWN[client_ip] = now
+
+    # 최근 10분(600초) 제보 보존 (최대 10분 락 및 점진 감쇄 지원)
+    CROWD_REPORTS_BY_STATION[station_id] = [r for r in CROWD_REPORTS_BY_STATION[station_id] if now - r["time"] < 600]
+    CROWD_REPORTS_BY_STATION[station_id].append({
+        "status": status,
+        "time": now,
+        "targetPlate": target_bus_plate,
+        "targetEta": target_eta_min
+    })
+    CROWD_REPORT_IP_COOLDOWN[client_ip] = {"time": now, "duration": dynamic_cooldown}
 
     # ⭐ 디스크 영구 저장 (서버 재부팅/재배포 시에도 제보 보존)
     save_crowd_data_to_disk()
 
     # ⭐ 제보 등록 즉시 모든 캐시 무효화 (0.001초 즉시 반영)
-    global CACHE_BUS_ARRIVALS, CACHE_XAI_ANALYSIS
     CACHE_BUS_ARRIVALS.clear()
     CACHE_XAI_ANALYSIS.clear()
     
-    return {"success": True, "message": "학우님의 제보가 실시간 XAI 모델에 즉시 반영되었습니다!"}
+    cooldown_min_text = f"{dynamic_cooldown // 60}분"
+    return {
+        "success": True, 
+        "message": f"학우님의 제보가 실시간 XAI 모델에 즉시 반영되었습니다! (도착 주기 연동 쿨다운: {cooldown_min_text})",
+        "cooldownSec": dynamic_cooldown
+    }
 
 def get_crowd_summary(station_id="119000302"):
-    """최근 5분간 학우들의 정류장별 제보 요약 및 오후 3~5시 하교 피크 분석"""
+    """최근 제보 요약 및 버스 미도착 시 대기열 락(Lock) & 점진 감쇄(Decay) 분석"""
     import time, datetime
     now = time.time()
     reports = CROWD_REPORTS_BY_STATION.get(station_id, [])
-    valid_reports = [r for r in reports if now - r["time"] < 300]
-    # ⭐ 오후 3시 25분~5시 30분 (15:25 ~ 17:30) 학생 하교/귀가 피크 시간대 여부 판별
+
+    # 1. 5분(300초) 이내 신선한 제보
+    fresh_reports = [r for r in reports if now - r["time"] < 300]
+    # 2. 5분~10분(600초) 이전 제보 (버스 미도착 상태 잔류 대기열 검사용, 최대 10분)
+    older_reports = [r for r in reports if 300 <= (now - r["time"]) < 600]
+
+    # 정류장 현재 첫 번째 도착 예정 버스 조회
+    curr_first_plate = ""
+    curr_first_min = 999
+    cached_buses = CACHE_BUS_ARRIVALS.get(station_id)
+    if cached_buses and cached_buses.get("data"):
+        arr_list = cached_buses["data"].get("arrivingBuses", [])
+        if arr_list:
+            curr_first_plate = arr_list[0].get("shortPlate", "")
+            curr_first_min = arr_list[0].get("predictTimeMin", 999)
+
+    is_sticky = False
+    sticky_decay_factor = 1.0
+
+    if fresh_reports:
+        valid_reports = fresh_reports
+    elif older_reports:
+        last_r = older_reports[-1]
+        age_sec = now - last_r["time"]
+        target_plate = last_r.get("targetPlate", "")
+        # ⭐ 핵심: 직전 제보 당시 타겟 버스가 아직 안 왔거나, 첫 차가 오고 있는 중(curr_first_min > 1)
+        bus_not_arrived_yet = (target_plate and target_plate == curr_first_plate) or (curr_first_min > 1)
+
+        if last_r["status"] in ["crowded", "moderate"] and bus_not_arrived_yet:
+            # 승객이 아직 버스에 타지 못했으므로 혼잡 대기열을 유지(Lock)하되 반감기 점진 감쇄 적용 (최대 10분)!
+            is_sticky = True
+            valid_reports = [last_r]
+            if age_sec < 450:       # 5~7.5분: 85% 잔류
+                sticky_decay_factor = 0.85
+            else:                   # 7.5~10분: 70% 잔류
+                sticky_decay_factor = 0.70
+        else:
+            valid_reports = []
+    else:
+        valid_reports = []
+
+    profile = STATION_XAI_PROFILES.get(station_id)
+    if profile:
+        st_name = profile["name"]
+        is_down = (profile["dir"] == "DOWN")
+    else:
+        matched = next((s for s in CACHED_STATIONS if s["id"] == str(station_id)), None)
+        if matched:
+            st_name = matched["name"]
+            is_down = (matched.get("dir") == "DOWN")
+        else:
+            st_name = "해당 정류장"
+            is_down = (str(station_id) == "119000302")
+
+    # ⭐ 방향별 피크 시간대 판별:
+    # 1) 사당역 9번 출구 (하행 DOWN, 수원대행): 평일 아침 등교 피크 (07:30 ~ 10:10)
+    # 2) 수원대입구/신명/아이파크/효행초 (상행 UP, 사당역행): 평일 오후 하교 피크 (15:25 ~ 17:30)
     now_dt = datetime.datetime.now()
     time_float = now_dt.hour + now_dt.minute / 60.0
-    is_afternoon_rush = (15 + 25/60.0 <= time_float <= 17 + 30/60.0)
-    profile = STATION_XAI_PROFILES.get(station_id, STATION_XAI_PROFILES["119000302"])
-    st_name = profile["name"]
+    weekday = now_dt.weekday()  # 0:월 ~ 4:금, 5:토, 6:일
+
+    if is_down:
+        is_peak = (weekday < 5) and (7.5 <= time_float <= (10.0 + 10.0/60.0))
+        peak_name = "등교 피크 (07:30~10:10)"
+    else:
+        is_peak = (weekday < 5) and ((15.0 + 25.0/60.0) <= time_float <= (17.0 + 30.0/60.0))
+        peak_name = "하교 피크 (15:25~17:30)"
+
     if valid_reports:
         cnt_smooth = sum(1 for r in valid_reports if r["status"] == "smooth")
         cnt_mod = sum(1 for r in valid_reports if r["status"] == "moderate")
@@ -390,14 +503,23 @@ def get_crowd_summary(station_id="119000302"):
             xai_insight = f"{st_name} 대기열이 15명 미만으로 여유로워 첫 차 착석 성공 확률이 대폭 상승했습니다."
             color = "emerald"
         elif dominant_status == "moderate":
-            status_text = "보통 (30~40명 대기)"
-            desc_text = f"{'오후 하교 피크(15:25~17:30)로 ' if is_afternoon_rush else ''}대기열이 형성 중입니다. 잔여좌석에 따라 1~2대 대기할 수 있습니다."
-            xai_insight = f"{st_name} 실시간 대기열 35명 내외로 앞 정류장 승차 누적 잔여석과의 경합이 발생 중입니다."
+            status_text = "보통 (15~25명 대기)" if not is_sticky else "보통 (15~25명 대기 잔류)"
+            desc_text = (f"직전 제보 이후 버스 승차가 아직 완료되지 않아, 보통 대기열({int(sticky_decay_factor*100)}%)이 유지 중인 것으로 추정됩니다."
+                         if is_sticky else
+                         f"{f'{peak_name}로 ' if is_peak else ''}15~25명 내외 대기열이 형성 중입니다. 줄 순번에 따라 안정적인 착석이 가능합니다.")
+            xai_insight = (f"사당역 9번 출구 직전 보통(15~25명) 제보 잔류로 줄 순번에 따른 착석이 예상됩니다."
+                           if (is_down and is_sticky) else
+                           (f"사당역 9번 출구 보통(15~25명) 대기열로 줄 순번에 따라 착석이 가능합니다." if is_down else
+                            f"{st_name} 실시간 대기열(15~25명)로 앞 정류장 승차 누적 잔여석과의 경합이 발생 중입니다."))
             color = "amber"
         else:
-            status_text = "포화 (정류장 줄 장동)"
-            desc_text = f"{'오후 하교 피크(15:25~17:30) 학생 집중으로 ' if is_afternoon_rush else ''}줄이 길게 늘어서 있습니다. 다음 차 탑승을 고려하세요."
-            xai_insight = f"{st_name} 대기 인원 50명 이상 포화로, 버스 1대 만석 초과 위험이 반영되어 착석 확률이 30% 이하로 급감했습니다."
+            status_text = "포화 (정류장 줄 장동)" if not is_sticky else "포화 (승차 대기 잔류)"
+            desc_text = (f"직전 혼잡 제보 이후 버스 승차가 아직 완료되지 않아, 대기 인원({int(sticky_decay_factor*100)}%)이 줄을 유지 중인 것으로 추정됩니다."
+                         if is_sticky else
+                         f"{f'{peak_name} 학생 집중으로 ' if is_peak else ''}줄이 길게 늘어서 있습니다. 다음 차 탑승을 고려하세요.")
+            xai_insight = (f"{st_name} 직전 혼잡 제보 이후 버스 미도착으로 잔류 대기열이 유지되어 착석 확률이 낮게 유지됩니다."
+                           if is_sticky else
+                           f"{st_name} 대기 인원 포화로, 버스 1대 만석 초과 위험이 반영되어 착석 확률이 30% 이하로 급감했습니다.")
             color = "rose"
         return {
             "hasData": True,
@@ -409,21 +531,29 @@ def get_crowd_summary(station_id="119000302"):
             "totalCount": len(valid_reports),
             "counts": {"smooth": cnt_smooth, "moderate": cnt_mod, "crowded": cnt_crowd},
             "lastReportMinutesAgo": last_min,
-            "isAfternoonRush": is_afternoon_rush
+            "isPeak": is_peak,
+            "peakName": peak_name,
+            "isAfternoonRush": (is_peak and not is_down),
+            "isSticky": is_sticky,
+            "stickyDecayFactor": sticky_decay_factor
         }
     else:
-        rush_hint = " (현재 오후 3:25~5:30 하교 피크 시간대)" if is_afternoon_rush else ""
+        rush_hint = f" (현재 {peak_name} 시간대)" if is_peak else ""
         return {
             "hasData": False,
             "status": "none",
             "statusText": "최근 5분 내 제보 없음",
             "descText": f"현재 {st_name} 대기열 제보가 없습니다{rush_hint}. 노선도 탭에서 1초 제보에 참여해 주세요!",
-            "xaiInsight": f"최근 5분 제보가 없어 {'오후 하교 피크(15:25~17:30) 통계 모델' if is_afternoon_rush else '평일 정규 승하차 패턴'}을 적용 중입니다.",
+            "xaiInsight": f"최근 5분 제보가 없어 {f'{peak_name} 통계 모델' if is_peak else '평일 정규 승하차 패턴'}을 적용 중입니다.",
             "color": "gray",
             "totalCount": 0,
             "counts": {"smooth": 0, "moderate": 0, "crowded": 0},
             "lastReportMinutesAgo": None,
-            "isAfternoonRush": is_afternoon_rush
+            "isPeak": is_peak,
+            "peakName": peak_name,
+            "isAfternoonRush": (is_peak and not is_down),
+            "isSticky": False,
+            "stickyDecayFactor": 1.0
         }
 
 # ⭐ 사당역 9번 출구(하행 수원대행) 학우 제보 부재 시 자동 작동하는
@@ -437,9 +567,9 @@ def estimate_sadang_waiters_by_time():
     # 주말 (토/일)
     if weekday >= 5:
         if 11 <= hour <= 19:
-            return 14, "주말 일반 통행 분산 (14명 내외)"
+            return 10, "주말 일반 통행 분산"
         else:
-            return 6, "주말 한산 시간대 (6명 내외)"
+            return 4, "주말 한산 시간대"
 
     # 평일 요일 가중치 (월/화 등교 집중 1.15배, 금공강 0.75배)
     day_multiplier = 1.15 if weekday in [0, 1] else (0.75 if weekday == 4 else 1.0)
@@ -447,29 +577,38 @@ def estimate_sadang_waiters_by_time():
 
     time_float = hour + minute / 60.0
 
-    if 7.5 <= time_float < 8.75:  # 07:30 ~ 08:45 (9시 1교시 등교 극피크)
-        base = 52
-        desc = f"{day_name}요일 9시 1교시 등교 극피크"
-    elif 8.75 <= time_float < 10.15:  # 08:45 ~ 10:10 (10:30 2교시 등교 피크)
+    if 7.5 <= time_float < (7 + 50/60.0):  # 07:30 ~ 07:50 (1교시 등교열 급증 구간)
+        base = 34
+        desc = f"{day_name}요일 1교시 등교열 급증 (07:30~07:50)"
+    elif (7 + 50/60.0) <= time_float < (8 + 25/60.0):  # 07:50 ~ 08:25 (9시 1교시 등교 최대 극피크)
         base = 38
-        desc = f"{day_name}요일 10:30 2교시 등교 피크"
-    elif 10.15 <= time_float < 12.0:  # 10:10 ~ 12:00 (오전 분산 통학)
+        desc = f"{day_name}요일 1교시 등교 극피크 (07:50~08:25)"
+    elif (8 + 25/60.0) <= time_float < (8 + 50/60.0):  # 08:25 ~ 08:50 (8:30 기점 1교시 마무리 및 대기열 감소세)
+        base = 26
+        desc = f"{day_name}요일 1교시 승차 마무리·대기열 감소세 (08:25~08:50)"
+    elif (8 + 50/60.0) <= time_float < (9 + 35/60.0):  # 08:50 ~ 09:35 (10:30 2교시 등교 완만 피크)
         base = 20
+        desc = f"{day_name}요일 10:30 2교시 등교 피크 (08:50~09:35)"
+    elif (9 + 35/60.0) <= time_float < (10 + 10/60.0):  # 09:35 ~ 10:10 (2교시 승차 마무리 및 완화)
+        base = 14
+        desc = f"{day_name}요일 2교시 승차 마무리 (09:35~10:10)"
+    elif (10 + 10/60.0) <= time_float < 12.0:  # 10:10 ~ 12:00 (오전 분산 통학)
+        base = 12
         desc = "오전 분산 통학 시간대"
     elif 12.0 <= time_float < 13.5:  # 12:00 ~ 13:30 (오후 수업 등교 & 점심)
-        base = 12  # 학우 피드백 반영: 10~15명 내외 (기본 12명)
-        desc = "3교시 점심 분산 시간대 (10~15명)"
+        base = 9
+        desc = "3교시 점심 분산 시간대"
     elif 13.5 <= time_float < 16.5:  # 13:30 ~ 16:30 (낮 한산 시간대)
-        base = 10
+        base = 7
         desc = "낮 시간대 통학 한산"
     elif 16.5 <= time_float < 19.5:  # 16:30 ~ 19:30 (퇴근길 봉담/수원대 귀가)
-        base = 28
+        base = 20
         desc = "퇴근길 봉담 방면 승차 집중"
     elif 19.5 <= time_float < 22.0:  # 19:30 ~ 22:00 (야간 귀가)
-        base = 16
+        base = 11
         desc = "야간 귀가 시간대"
     else:  # 심야/새벽
-        base = 5
+        base = 4
         desc = "심야/새벽 한산 시간대"
 
     est = int(round(base * day_multiplier))
@@ -780,30 +919,33 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                 # 실제 총 수용 좌석은 2층 버스 71석, 1층 버스 45석입니다.
                 eval_seats = 71 if is_double else 45
 
+                is_sticky = crowd_info.get("isSticky", False)
+                decay_fac = crowd_info.get("stickyDecayFactor", 1.0)
+
                 if crowd_status == "smooth":
-                    est_waiters = 12
+                    est_waiters = 8
                     delta = 3
-                    tft_crowd_weight = 42
-                    crowd_desc = "학우 실시간 제보: 대기열 15명 미만으로 즉시 착석 유력"
+                    tft_crowd_weight = 40
+                    crowd_desc = "학우 실시간 제보: 대기열이 짧아 즉시 착석 유력"
                     is_from_report = True
                 elif crowd_status == "moderate":
-                    est_waiters = 35
+                    est_waiters = max(12, int(round(20 * decay_fac)))
                     delta = 4
-                    tft_crowd_weight = 45
-                    crowd_desc = "학우 실시간 제보: 대기 35명 내외로 앞쪽 순번 착석 경합"
+                    tft_crowd_weight = 42
+                    crowd_desc = "학우 실시간 제보: 보통 수준 대기열로 줄 순번에 따라 착석 가능" if not is_sticky else "직전 제보 잔류: 버스 승차 대기열 반영 중"
                     is_from_report = True
                 elif crowd_status == "crowded":
-                    est_waiters = 55
+                    est_waiters = max(22, int(round(40 * decay_fac)))
                     delta = 6
-                    tft_crowd_weight = 52
-                    crowd_desc = "학우 실시간 제보: 대기열 50명 이상 포화로 다음 차 대기 유력"
+                    tft_crowd_weight = 48
+                    crowd_desc = "학우 실시간 제보: 대기 인원이 많아 다음 차 대기 가능성 고려" if not is_sticky else "직전 혼잡 제보 잔류: 버스 승차 미완료로 대기 인원 지속"
                     is_from_report = True
                 else:
                     # ⭐ 실시간 제보 부재 시: 수원대 통학 시간표 및 요일별 사전 통계 모델 자동 가동
                     est_waiters, time_slot_desc = estimate_sadang_waiters_by_time()
                     delta = 4
                     tft_crowd_weight = 35
-                    crowd_desc = f"통학 통계 모델: [{time_slot_desc}] 기준 약 {est_waiters}명 대기 추정"
+                    crowd_desc = f"통학 통계 모델: [{time_slot_desc}] 기준 대기열 분석"
                     is_from_report = False
 
                 # 사당역 진입 버스(빈 차 45석 또는 71석)와 대기열 간 착석 성공률 계산
@@ -826,16 +968,26 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                     boarding_status = "착석 주의 (다음 차 대기 유력)"
                     prob_color = "rose"
 
-                # 설명 문구 생성 (2층/1층 버스 스펙 완벽 결합)
+                # 설명 문구 생성 (2층/1층 버스 스펙 완벽 결합, 대기열 인원수 숫자 비노출)
                 if is_from_report:
-                    decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하며, 학우 실시간 제보({crowd_info['statusText']}, 대기 약 {est_waiters}명)를 반영하여 착석 확률이 {boarding_prob}%로 산출되었습니다."
+                    sticky_tag = " (직전 제보 승차 대기 중)" if is_sticky else ""
+                    if seat_diff >= 15:
+                        decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하며, 학우 실시간 제보({crowd_info['statusText']}){sticky_tag}를 감안해도 여유로운 착석 탑승이 유력합니다."
+                    elif seat_diff >= 3:
+                        decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하며, 학우 실시간 제보({crowd_info['statusText']}){sticky_tag} 기준 줄 순번에 따라 안정적인 착석이 예상됩니다."
+                    elif seat_diff >= -5:
+                        decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하나, 학우 실시간 제보({crowd_info['statusText']}){sticky_tag}로 인해 앞쪽 순번 중심의 착석 경합이 발생할 수 있습니다."
+                    else:
+                        decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하나, 학우 실시간 제보({crowd_info['statusText']}){sticky_tag}에 따라 대기 인원이 많아 다음 차 대기를 고려하세요."
                 else:
                     if seat_diff < -5:
-                        decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하나, 현재 [{time_slot_desc}]로 대기열 약 {est_waiters}명이 형성되어 있어 1층 버스는 만석으로 다음 차 대기 가능성이 높습니다."
-                    elif is_double and est_waiters >= 40:
-                        decision_text = f"현재 [{time_slot_desc}]로 대기열 약 {est_waiters}명이 형성되어 있으나, 이번 도착 차량이 2층 버스(71석)이므로 대기 인원 전원 여유로운 착석 탑승이 유력합니다!"
+                        decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하나, 현재 [{time_slot_desc}]로 대기 인원이 많아 1층 버스는 만석으로 다음 차 대기 가능성이 높습니다."
+                    elif is_double and est_waiters >= 30:
+                        decision_text = f"현재 [{time_slot_desc}]로 승차 대기열이 형성되어 있으나, 이번 도착 차량이 2층 버스(71석)이므로 대기 인원 전원 여유로운 착석 탑승이 유력합니다!"
+                    elif seat_diff >= 15:
+                        decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하며, 현재 [{time_slot_desc}] 기준 여유로운 착석 탑승이 유력합니다."
                     else:
-                        decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하며, 현재 [{time_slot_desc}]로 대기열 약 {est_waiters}명 대비 착석 확률 {boarding_prob}%로 산출되었습니다."
+                        decision_text = f"사당역 회차 후 빈 차({bus_type_title})로 진입하며, 현재 [{time_slot_desc}] 대기 상황을 감안할 때 줄 순번에 따라 착석이 가능할 것으로 예상됩니다."
 
             else:
                 # [상행 사당역행]: 실질 잔여좌석(effective_seats) 및 오후 3~5시 하교 피크 반영
@@ -894,21 +1046,24 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                 else:  # 수원대입구 (233003021, 기점 16번째 - 학생 하교 최다 정류장)
                     # 💡 사용자 피드백 반영: 악의적/허위 제보로 인한 왜곡 방지를 위해
                     # 수원대 제보 가중치를 소폭 완화(Damping)하고 대기열 차감 수치를 완만하게 조정
+                    is_sticky = crowd_info.get("isSticky", False)
+                    decay_fac = crowd_info.get("stickyDecayFactor", 1.0)
+
                     if is_afternoon_rush:
                         if is_hyohaeng_surge:
                             if crowd_status == "crowded":
-                                est_waiters = 32  # 완화 (기존 40명 -> 32명)
+                                est_waiters = int(round(32 * decay_fac))  # 완화 (기존 40명 -> 32명)
                             elif crowd_status == "moderate":
-                                est_waiters = 22  # 완화 (기존 28명 -> 22명)
+                                est_waiters = int(round(22 * decay_fac))  # 완화 (기존 28명 -> 22명)
                             elif crowd_status == "smooth":
                                 est_waiters = 10
                             else:
                                 est_waiters = 18
                         else:
                             if crowd_status == "crowded":
-                                est_waiters = 22  # 완화 (기존 28명 -> 22명)
+                                est_waiters = int(round(22 * decay_fac))  # 완화 (기존 28명 -> 22명)
                             elif crowd_status == "moderate":
-                                est_waiters = 15  # 완화 (기존 18명 -> 15명)
+                                est_waiters = int(round(15 * decay_fac))  # 완화 (기존 18명 -> 15명)
                             elif crowd_status == "smooth":
                                 est_waiters = 7
                             else:
@@ -917,18 +1072,18 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                         # 평상시 완화 차감치
                         if is_hyohaeng_surge:
                             if crowd_status == "crowded":
-                                est_waiters = 24  # 완화 (기존 32명 -> 24명)
+                                est_waiters = int(round(24 * decay_fac))  # 완화 (기존 32명 -> 24명)
                             elif crowd_status == "moderate":
-                                est_waiters = 15  # 완화 (기존 20명 -> 15명)
+                                est_waiters = int(round(15 * decay_fac))  # 완화 (기존 20명 -> 15명)
                             elif crowd_status == "smooth":
                                 est_waiters = 5
                             else:
                                 est_waiters = 8
                         else:
                             if crowd_status == "crowded":
-                                est_waiters = 18  # 완화 (기존 24명 -> 18명)
+                                est_waiters = int(round(18 * decay_fac))  # 완화 (기존 24명 -> 18명)
                             elif crowd_status == "moderate":
-                                est_waiters = 11  # 완화 (기존 14명 -> 11명)
+                                est_waiters = int(round(11 * decay_fac))  # 완화 (기존 14명 -> 11명)
                             elif crowd_status == "smooth":
                                 est_waiters = 4
                             else:
@@ -940,7 +1095,7 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                     is_from_report = (crowd_status in ["crowded", "moderate", "smooth"])
                     # 악용 방지: 수원대 제보 가중치를 기존 54%에서 40%로 소폭 하향 조정
                     tft_crowd_weight = 40 if is_from_report else 35
-                    crowd_desc = f"학우 실시간 제보({crowd_info['statusText']}): 수원대 대기열 약 {est_waiters}명 (신뢰 완충)" if is_from_report else f"수원대 대기열(약 {est_waiters}명) 및 잔여 좌석 종합 분석"
+                    crowd_desc = f"학우 실시간 제보({crowd_info['statusText']}): 수원대 대기열 분석 (신뢰 완충)" if is_from_report else "수원대 대기열 및 잔여 좌석 종합 분석"
 
                     surge_warn = " 🚨(앞 정류장 조기 승차 급증으로 잔여 좌석이 빠르게 줄어들 수 있습니다)" if is_hyohaeng_surge else ""
 
@@ -950,50 +1105,50 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                             boarding_status = "착석 확실 (좌석 여유)"
                             prob_color = "emerald"
                             delta = 3
-                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로 여유로우며, 수원대 실시간 제보(대기열 약 {est_waiters}명) 및 앞선 승차를 감안해도 착석 탑승이 유력합니다.{surge_warn}"
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로 여유로우며, 수원대 실시간 제보 및 앞선 승차를 감안해도 착석 탑승이 유력합니다.{surge_warn}"
                         elif seat_diff >= -3:
                             boarding_prob = 80
                             boarding_status = "착석 양호 (줄 순번 안정)"
                             prob_color = "emerald"
                             delta = 4
-                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로, 수원대 실시간 제보(대기열 약 {est_waiters}명) 및 앞선 승차를 감안해도 줄 순번에 따라 안정적인 착석이 예상됩니다.{surge_warn}"
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로, 수원대 실시간 제보 및 앞선 승차를 감안해도 줄 순번에 따라 안정적인 착석이 예상됩니다.{surge_warn}"
                         elif seat_diff >= -8:
                             boarding_prob = 58
                             boarding_status = "착석 경합 (탑승 가능/입석 대비)"
                             prob_color = "amber"
                             delta = 4
-                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로, 수원대 실시간 제보(대기열 약 {est_waiters}명)와 앞선 정류장 승차 누적으로 인해 줄 순번에 따라 착석 경합이 발생할 수 있습니다.{surge_warn}"
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로, 수원대 실시간 제보와 앞선 정류장 승차 누적으로 인해 줄 순번에 따라 착석 경합이 발생할 수 있습니다.{surge_warn}"
                         else:
                             boarding_prob = 38
                             boarding_status = "착석 주의 (다음 차 대기 고려)"
                             prob_color = "rose"
                             delta = 5
-                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석이나, 수원대 실시간 제보(대기열 약 {est_waiters}명)와 앞선 승차 누적으로 인해 수원대 도착 시 만석이 될 수 있어 다음 차 대기를 고려하세요.{surge_warn}"
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석이나, 수원대 실시간 제보와 앞선 승차 누적으로 인해 수원대 도착 시 만석이 될 수 있어 다음 차 대기를 고려하세요.{surge_warn}"
                     else:
                         if seat_diff >= 5:
                             boarding_prob = 94
                             boarding_status = "착석 확실 (좌석 여유)"
                             prob_color = "emerald"
                             delta = 3
-                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로 여유로우며, 앞선 정류장 승차를 감안해도 수원대에서 여유로운 착석 탑승이 유력합니다. (대기열 약 {est_waiters}명){surge_warn}"
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로 여유로우며, 앞선 정류장 승차를 감안해도 수원대에서 여유로운 착석 탑승이 유력합니다.{surge_warn}"
                         elif seat_diff >= -3:
                             boarding_prob = 80
                             boarding_status = "착석 양호 (줄 순번 안정)"
                             prob_color = "emerald"
                             delta = 4
-                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로, 앞선 정류장 승차를 감안해도 줄 순번에 따라 안정적인 착석이 예상됩니다. (대기열 약 {est_waiters}명){surge_warn}"
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로, 앞선 정류장 승차를 감안해도 줄 순번에 따라 안정적인 착석이 예상됩니다.{surge_warn}"
                         elif seat_diff >= -8:
                             boarding_prob = 58
                             boarding_status = "착석 경합 (탑승 가능/입석 대비)"
                             prob_color = "amber"
                             delta = 4
-                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로, 앞선 정류장 승차와 수원대 대기열(약 {est_waiters}명)로 인해 줄 순번에 따라 착석 경합이 발생할 수 있습니다.{surge_warn}"
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석으로, 앞선 정류장 승차 누적으로 인해 줄 순번에 따라 착석 경합이 발생할 수 있습니다.{surge_warn}"
                         else:
                             boarding_prob = 38
                             boarding_status = "착석 주의 (다음 차 대기 고려)"
                             prob_color = "rose"
                             delta = 5
-                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석이나, 앞선 정류장 승차 누적으로 수원대 도착 시 만석이 될 수 있어 다음 차 대기를 고려하세요. (대기열 약 {est_waiters}명){surge_warn}"
+                            decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석이나, 앞선 정류장 승차 누적으로 수원대 도착 시 만석이 될 수 있어 다음 차 대기를 고려하세요.{surge_warn}"
 
             # 95% 착석 신뢰구간 수학적 계산 (실질 잔여좌석 기준)
             eval_seats = effective_seats if not is_down else (71 if is_double else 45)
@@ -1039,7 +1194,7 @@ def get_xai_analysis(station_id: str = Query("119000302")):
     model_meta = {
         "modelName": "7790 스마트 통학 지원 AI",
         "algorithm": "앞 정류장 승차 누적 예측 + 실시간 도로망 지연 분석",
-        "dataSources": ["경기도 버스 실시간 GPS", "기상청 실시간 기상/노면 데이터", f"{profile['name']} 학우 실시간 제보 & 하교 패턴"],
+        "dataSources": ["경기도 버스 실시간 GPS", "기상청 실시간 기상/노면 데이터", f"{profile['name']} 학우 실시간 제보 & {'등교 통학 패턴' if is_down else '하교 통학 패턴'}"],
         "totalActiveBuses": len(vehicles),
         "confidenceLevel": "95% 착석 신뢰 보증",
         "modelVersion": "v3.1-LiveTransit"

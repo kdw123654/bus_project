@@ -144,7 +144,7 @@
                 </button>
                 <button onclick="sendCrowdReport('moderate')" class="py-2 px-1 rounded-lg bg-amber-50 hover:bg-amber-100 active:scale-95 border border-amber-300 text-amber-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
                   <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block mr-1"></span>보통</span>
-                  <span class="text-[9px] font-medium text-amber-600 mt-0.5">30~40명 내외</span>
+                  <span class="text-[9px] font-medium text-amber-600 mt-0.5">15~25명 내외</span>
                 </button>
                 <button onclick="sendCrowdReport('crowded')" class="py-2 px-1 rounded-lg bg-rose-50 hover:bg-rose-100 active:scale-95 border border-rose-300 text-rose-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
                   <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-rose-500 inline-block mr-1"></span>포화</span>
@@ -298,12 +298,13 @@
       }
     }
 
-    // ⭐ 5분 쿨다운 검증 함수 (어뷰징 및 중복 도배 방지 - DB 불필요, localStorage 활용)
+    // ⭐ 도착 버스 주기 연동 동적 쿨다운 검증 함수 (최대 10분, 최소 2분)
     function checkCrowdCooldown() {
       const lastTime = localStorage.getItem("last_crowd_report_time");
+      const cooldownMs = parseInt(localStorage.getItem("last_crowd_cooldown_ms") || "300000", 10);
       if (!lastTime) return 0;
       const elapsed = Date.now() - parseInt(lastTime, 10);
-      const remaining = 300000 - elapsed; // 5분 (300,000ms)
+      const remaining = cooldownMs - elapsed;
       return remaining > 0 ? remaining : 0;
     }
 
@@ -320,9 +321,9 @@
           <div class="py-2.5 px-3 bg-blue-50/90 border border-blue-200 rounded-xl text-center space-y-1 shadow-xs">
             <div class="flex items-center justify-center space-x-1.5 text-blue-800 font-bold text-xs">
               <span class="w-2 h-2 rounded-full bg-blue-600 animate-ping"></span>
-              <span>✅ 제보 접수 완료 (남은 쿨타임: ${min}분 ${String(sec).padStart(2, '0')}초)</span>
+              <span>✅ 제보 접수 완료 (다음 제보: ${min}분 ${String(sec).padStart(2, '0')}초 후)</span>
             </div>
-            <p class="text-[10px] text-gray-500">도배 방지와 공정한 AI 분석을 위해 5분에 1회만 참여 가능합니다.</p>
+            <p class="text-[10px] text-gray-500">도착 예정 버스 주기와 연동된 쿨다운(최대 10분)이 적용됩니다.</p>
           </div>
         `;
         if (promptEl) promptEl.innerText = `소중한 제보 감사합니다!`;
@@ -335,7 +336,7 @@
             </button>
             <button onclick="sendCrowdReport('moderate')" class="py-2 px-1 rounded-lg bg-amber-50 hover:bg-amber-100 active:scale-95 border border-amber-300 text-amber-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
               <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block mr-1"></span>보통</span>
-              <span class="text-[9px] font-medium text-amber-600 mt-0.5">30~40명 내외</span>
+              <span class="text-[9px] font-medium text-amber-600 mt-0.5">15~25명 내외</span>
             </button>
             <button onclick="sendCrowdReport('crowded')" class="py-2 px-1 rounded-lg bg-rose-50 hover:bg-rose-100 active:scale-95 border border-rose-300 text-rose-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
               <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-rose-500 inline-block mr-1"></span>포화</span>
@@ -347,11 +348,13 @@
       }
     }
 
-    // ⭐ 학우 실시간 줄 제보 전송 함수 (5분 쿨다운 적용)
+    // ⭐ 학우 실시간 줄 제보 전송 함수 (도착 주기 연동 쿨다운)
     async function sendCrowdReport(status) {
       const remaining = checkCrowdCooldown();
       if (remaining > 0) {
-        alert("⏱️ 도배 방지를 위해 5분에 1회만 제보할 수 있습니다.");
+        const min = Math.floor(remaining / 60000);
+        const sec = Math.floor((remaining % 60000) / 1000);
+        alert(`⏱️ 도착 버스 주기 연동으로 ${min}분 ${sec}초 후 다시 제보할 수 있습니다.`);
         return;
       }
 
@@ -359,12 +362,19 @@
         const res = await fetch(`/api/crowd-report?station_id=${selectedStationId}&status=${encodeURIComponent(status)}`, { method: "POST" });
         const data = await res.json();
         if (data.success) {
+          const cooldownSec = data.cooldownSec || 300;
           localStorage.setItem("last_crowd_report_time", Date.now());
+          localStorage.setItem("last_crowd_cooldown_ms", String(cooldownSec * 1000));
           updateCrowdButtonsUI();
-          alert(`✅ ${selectedStationName} 줄 제보가 등록되었습니다! 노선도 및 XAI 분석에 실시간 반영됩니다.`);
+          alert(data.message || `✅ ${selectedStationName} 줄 제보가 등록되었습니다!`);
           fetchBusData();
           if (currentTab === 'xai') fetchXaiData(true);
         } else {
+          if (data.remainCooldown) {
+            localStorage.setItem("last_crowd_report_time", Date.now());
+            localStorage.setItem("last_crowd_cooldown_ms", String(data.remainCooldown * 1000));
+            updateCrowdButtonsUI();
+          }
           alert(data.message || "제보 처리에 실패했습니다.");
         }
       } catch (err) {
@@ -432,6 +442,8 @@
           totalCount: 0,
           counts: { smooth: 0, moderate: 0, crowded: 0 },
           lastReportMinutesAgo: null,
+          isPeak: false,
+          peakName: "",
           isAfternoonRush: false
         };
 
@@ -460,7 +472,8 @@
                 <h3 class="text-xs font-black text-gray-900 tracking-tight">${meta.name} 대기열 영향도 분석</h3>
               </div>
               <div class="flex items-center space-x-1">
-                ${crowd.isAfternoonRush ? '<span class="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded border border-amber-300">하교 피크 (15:25~17:30)</span>' : ''}
+                ${crowd.isSticky ? '<span class="text-[9px] bg-purple-50 text-purple-700 font-bold px-1.5 py-0.5 rounded border border-purple-300">버스 승차 대기 잔류</span>' : ''}
+                ${(crowd.isPeak || crowd.isAfternoonRush) ? `<span class="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded border border-amber-300">${crowd.peakName || '하교 피크 (15:25~17:30)'}</span>` : ''}
                 <span class="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-full border border-indigo-200">
                   학우 제보 Feature
                 </span>
@@ -707,7 +720,7 @@
         const now = new Date();
         updateTime.innerText = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} 갱신`;
 
-        // ⭐ 사당역 9번 출구 학우 실시간 대기열 현황 업데이트 (노선도 카드)
+        // ⭐ 정류장 학우 실시간 대기열 현황 업데이트 (노선도 카드)
         const crowd = data.crowdData;
         if (crowd) {
           const time = document.getElementById("routeCrowdTime");
@@ -715,6 +728,15 @@
             time.innerText = crowd.lastReportMinutesAgo === null 
               ? "최근 5분 0건" 
               : `최근 5분 ${crowd.totalCount}건 (${crowd.lastReportMinutesAgo === 0 ? "방금 전" : crowd.lastReportMinutesAgo + "분 전"})`;
+          }
+          const badge = document.getElementById("rushHourBadge");
+          if (badge) {
+            if (crowd.isPeak || crowd.isAfternoonRush) {
+              badge.innerText = crowd.peakName || "피크 시간대";
+              badge.classList.remove("hidden");
+            } else {
+              badge.classList.add("hidden");
+            }
           }
         }
 
