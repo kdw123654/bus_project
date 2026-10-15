@@ -1,1 +1,1 @@
-{"reports": {}, "ips": {}}
+{"reports": {"119000302": [{"status": "moderate", "time": 1792047020.9673584, "targetPlate": "4549", "targetEta": 19}]}, "ips": {"127.0.0.1_119000302": {"time": 1792047020.9673584, "duration": 600}}}

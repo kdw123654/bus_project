@@ -336,7 +336,7 @@ def load_crowd_data_from_disk():
     global CROWD_REPORTS_BY_STATION, CROWD_REPORT_IP_COOLDOWN
     try:
         if os.path.exists(CROWD_DATA_FILE):
-            with open(CROWD_DATA_FILE, "r", encoding="utf-8") as f:
+            with open(CROWD_DATA_FILE, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
             now = time.time()
             clean_reports = {}
@@ -371,6 +371,12 @@ def report_crowd(
     target_bus_plate = ""
     target_eta_min = 5
     cached = CACHE_BUS_ARRIVALS.get(station_id)
+    if not (cached and cached.get("data")):
+        try:
+            get_bus_arrivals(station_id=station_id)
+            cached = CACHE_BUS_ARRIVALS.get(station_id)
+        except Exception:
+            pass
     if cached and cached.get("data"):
         arrs = cached["data"].get("arrivingBuses", [])
         if arrs:
@@ -385,9 +391,10 @@ def report_crowd(
     else:
         dynamic_cooldown = max(120, min(target_eta_min * 60, 600))  # 최대 10분(600초)
 
-    # 2. IP 기반 개인별 도배 방지 쿨다운 검사
+    # 2. IP 및 정류장 기반 개인별 도배 방지 쿨다운 검사 (정류장별 독립 쿨다운 보장)
     client_ip = get_real_client_ip(request)
-    last_record = CROWD_REPORT_IP_COOLDOWN.get(client_ip)
+    cooldown_key = f"{client_ip}_{station_id}"
+    last_record = CROWD_REPORT_IP_COOLDOWN.get(cooldown_key)
     if isinstance(last_record, dict):
         last_time = last_record.get("time", 0)
         cooldown_duration = last_record.get("duration", 300)
@@ -406,7 +413,8 @@ def report_crowd(
         return {
             "success": False,
             "message": f"도배 방지 및 도착 주기 연동으로 {time_msg} 후 다시 제보 가능합니다.",
-            "remainCooldown": remain
+            "remainCooldown": remain,
+            "stationId": station_id
         }
 
     if station_id not in CROWD_REPORTS_BY_STATION:
@@ -420,7 +428,7 @@ def report_crowd(
         "targetPlate": target_bus_plate,
         "targetEta": target_eta_min
     })
-    CROWD_REPORT_IP_COOLDOWN[client_ip] = {"time": now, "duration": dynamic_cooldown}
+    CROWD_REPORT_IP_COOLDOWN[cooldown_key] = {"time": now, "duration": dynamic_cooldown}
 
     # ⭐ 디스크 영구 저장 (서버 재부팅/재배포 시에도 제보 보존)
     save_crowd_data_to_disk()
@@ -433,7 +441,8 @@ def report_crowd(
     return {
         "success": True, 
         "message": f"학우님의 제보가 실시간 XAI 모델에 즉시 반영되었습니다! (도착 주기 연동 쿨다운: {cooldown_min_text})",
-        "cooldownSec": dynamic_cooldown
+        "cooldownSec": dynamic_cooldown,
+        "stationId": station_id
     }
 
 def get_crowd_summary(station_id="119000302"):
@@ -896,8 +905,15 @@ def get_xai_analysis(station_id: str = Query("119000302")):
 
             if not is_down:
                 current_seq = profile.get("seq", 16)
+                # ⭐ 학우 피드백(10/15) 핵심 반영: 버스의 현재 실시간 위치(남은 정류장 수) 기반 이중 차감 방지 및 상태 이관(Kalman Filter)
+                # 버스가 이미 통과한 정류장은 공공데이터 API 실시간 좌석(seats)에 이미 탑승객이 차감 반영되어 있으므로,
+                # 앞으로 실제로 거쳐야 할 정류장만 차감하고, 이미 지난 정류장은 예측치 그대로 실시간 잔여석을 신명/수원대로 이관 유지!
+                rem_stations = b.get("remainStations", 1)
+                bus_est_seq = current_seq - rem_stations
+
                 for up_node in UPSTREAM_STATION_CHAIN:
-                    if up_node["seq"] < current_seq:
+                    # 버스가 아직 도달하지 않은 정류장이면서 탑승 정류장보다 앞선 정류장만 차감!
+                    if bus_est_seq <= up_node["seq"] < current_seq:
                         st_id = up_node["id"]
                         up_summary = get_crowd_summary(station_id=st_id)
                         u_st = up_summary.get("status", "none")
@@ -981,8 +997,8 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                     tft_crowd_weight = 40
                     is_from_report = True
                 elif crowd_status == "moderate":
-                    base_mod = 36 if is_morning_rush else (28 if is_evening_rush else 15)
-                    est_waiters = max(14, int(round(base_mod * decay_fac)))
+                    base_mod = 25 if is_morning_rush else (22 if is_evening_rush else 18)
+                    est_waiters = max(12, int(round(base_mod * decay_fac)))
                     delta = 4
                     tft_crowd_weight = 45
                     crowd_desc = (f"학우 실시간 제보(보통) + 비사용자 대기열: 약 {est_waiters}명 차감 반영"

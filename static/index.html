@@ -152,6 +152,10 @@
                 </button>
               </div>
             </div>
+            <div class="mt-2 pt-1.5 border-t border-gray-100/60 flex items-center justify-between text-[10px] text-gray-400">
+              <span class="flex items-center"><span class="w-1.5 h-1.5 rounded-full bg-blue-500 mr-1 inline-block"></span>제보 부재 시에도 GBIS 텔레메트리 자동 분석 가동 중</span>
+              <span class="text-blue-600 font-medium">1초 터치 기여</span>
+            </div>
           </div>
         </div>
       </section>
@@ -252,11 +256,14 @@
       const crowdTitle = document.getElementById("routeCrowdTitle");
       if (crowdTitle) crowdTitle.innerText = `${name} 대기열 실시간 현황`;
       const crowdPrompt = document.getElementById("routeCrowdPrompt");
-      if (crowdPrompt) crowdPrompt.innerText = `지금 ${name} 대기열에 계신가요? 1초 제보`;
+      if (crowdPrompt) crowdPrompt.innerText = `지금 줄 서 계신가요? 1초 터치로 학우 돕기`;
 
       // XAI 헤더 타이틀 즉시 동기화
       const xaiTitle = document.getElementById("xaiHeaderTitle");
       if (xaiTitle) xaiTitle.innerText = `[탑승 정류장] ${name} (${dir === 'UP' ? '사당역행' : '수원대행'}) AI 탑승 & 잔여 좌석 분석`;
+
+      // 선택된 정류장의 쿨다운 상태에 맞춰 제보 버튼 UI 즉시 전환
+      updateCrowdButtonsUI();
 
       // ⭐ 탭 상태에 따른 즉시 실행 분기
       if (currentTab === 'xai') {
@@ -298,18 +305,28 @@
       }
     }
 
-    // ⭐ 도착 버스 주기 연동 동적 쿨다운 검증 함수 (최대 10분, 최소 2분)
-    function checkCrowdCooldown() {
-      const lastTime = localStorage.getItem("last_crowd_report_time");
-      const cooldownMs = parseInt(localStorage.getItem("last_crowd_cooldown_ms") || "300000", 10);
-      if (!lastTime) return 0;
+    // ⭐ 도착 버스 주기 연동 동적 쿨다운 검증 함수 (최대 10분, 최소 2분, 정류장별 독립 관리)
+    function checkCrowdCooldown(stId = selectedStationId) {
+      const lastTime = localStorage.getItem("last_crowd_report_time_" + stId);
+      const cooldownMs = parseInt(localStorage.getItem("last_crowd_cooldown_ms_" + stId) || "0", 10);
+      if (!lastTime) {
+        // 하위 호환성: 기존 전역 단일 키 검사
+        const legacyTime = localStorage.getItem("last_crowd_report_time");
+        const legacyCooldownMs = parseInt(localStorage.getItem("last_crowd_cooldown_ms") || "0", 10);
+        if (legacyTime && legacyCooldownMs) {
+          const elapsed = Date.now() - parseInt(legacyTime, 10);
+          const rem = legacyCooldownMs - elapsed;
+          if (rem > 0) return rem;
+        }
+        return 0;
+      }
       const elapsed = Date.now() - parseInt(lastTime, 10);
       const remaining = cooldownMs - elapsed;
       return remaining > 0 ? remaining : 0;
     }
 
     function updateCrowdButtonsUI() {
-      const remaining = checkCrowdCooldown();
+      const remaining = checkCrowdCooldown(selectedStationId);
       const promptEl = document.getElementById("routeCrowdPrompt");
       const btnArea = document.getElementById("crowdReportBtnArea");
       if (!btnArea) return;
@@ -321,7 +338,7 @@
           <div class="py-2.5 px-3 bg-blue-50/90 border border-blue-200 rounded-xl text-center space-y-1 shadow-xs">
             <div class="flex items-center justify-center space-x-1.5 text-blue-800 font-bold text-xs">
               <span class="w-2 h-2 rounded-full bg-blue-600 animate-ping"></span>
-              <span>✅ 제보 접수 완료 (다음 제보: ${min}분 ${String(sec).padStart(2, '0')}초 후)</span>
+              <span>✅ 제보 접수 완료 (${selectedStationName} 다음 제보: ${min}분 ${String(sec).padStart(2, '0')}초 후)</span>
             </div>
             <p class="text-[10px] text-gray-500">도착 예정 버스 주기와 연동된 쿨다운(최대 10분)이 적용됩니다.</p>
           </div>
@@ -344,35 +361,41 @@
             </button>
           </div>
         `;
-        if (promptEl) promptEl.innerText = `지금 ${selectedStationName} 대기열에 계신가요? 1초 제보`;
+        if (promptEl) promptEl.innerText = `지금 줄 서 계신가요? 1초 터치로 학우 돕기`;
       }
     }
 
-    // ⭐ 학우 실시간 줄 제보 전송 함수 (도착 주기 연동 쿨다운)
+    // ⭐ 학우 실시간 줄 제보 전송 함수 (도착 주기 연동 쿨다운, 정류장별 독립)
     async function sendCrowdReport(status) {
-      const remaining = checkCrowdCooldown();
+      const remaining = checkCrowdCooldown(selectedStationId);
       if (remaining > 0) {
         const min = Math.floor(remaining / 60000);
         const sec = Math.floor((remaining % 60000) / 1000);
-        alert(`⏱️ 도착 버스 주기 연동으로 ${min}분 ${sec}초 후 다시 제보할 수 있습니다.`);
+        alert(`⏱️ 도착 버스 주기 연동으로 ${selectedStationName}은(는) ${min}분 ${sec}초 후 다시 제보할 수 있습니다.`);
         return;
       }
 
       try {
-        const res = await fetch(`/api/crowd-report?station_id=${selectedStationId}&status=${encodeURIComponent(status)}`, { method: "POST" });
+        const targetStId = selectedStationId;
+        const res = await fetch(`/api/crowd-report?station_id=${targetStId}&status=${encodeURIComponent(status)}`, { method: "POST" });
         const data = await res.json();
         if (data.success) {
           const cooldownSec = data.cooldownSec || 300;
+          const resStId = data.stationId || targetStId;
+          localStorage.setItem("last_crowd_report_time_" + resStId, Date.now());
+          localStorage.setItem("last_crowd_cooldown_ms_" + resStId, String(cooldownSec * 1000));
+          // 레거시 전역 키도 갱신
           localStorage.setItem("last_crowd_report_time", Date.now());
           localStorage.setItem("last_crowd_cooldown_ms", String(cooldownSec * 1000));
           updateCrowdButtonsUI();
-          alert(data.message || `✅ ${selectedStationName} 줄 제보가 등록되었습니다!`);
+          alert(data.message || `✅ ${selectedStationName} 줄 제보가 접수되었습니다!\n학우님의 1초 기여로 실시간 AI 탑승 예측 모델이 더욱 정교해졌습니다`);
           fetchBusData();
           if (currentTab === 'xai') fetchXaiData(true);
         } else {
           if (data.remainCooldown) {
-            localStorage.setItem("last_crowd_report_time", Date.now());
-            localStorage.setItem("last_crowd_cooldown_ms", String(data.remainCooldown * 1000));
+            const resStId = data.stationId || targetStId;
+            localStorage.setItem("last_crowd_report_time_" + resStId, Date.now());
+            localStorage.setItem("last_crowd_cooldown_ms_" + resStId, String(data.remainCooldown * 1000));
             updateCrowdButtonsUI();
           }
           alert(data.message || "제보 처리에 실패했습니다.");
