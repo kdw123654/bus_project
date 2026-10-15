@@ -533,6 +533,20 @@
               </div>
             </div>
           `;
+        } else if (meta.dir === "DOWN") {
+          stationCardHTML += `
+            <div class="p-3.5 bg-indigo-50/70 rounded-2xl border border-indigo-200 text-xs space-y-1.5">
+              <div class="flex justify-between items-center">
+                <span class="font-black text-indigo-900">${meta.name} 하행(수원대행) 탑승 분석</span>
+                <span class="text-[10px] text-indigo-700 font-bold">회차점 · 빈 차 진입</span>
+              </div>
+              <p class="text-[11px] text-gray-700 leading-snug">사당역은 전원 하차 후 빈 차로 진입하므로, <strong>출구 앞 대기열(서비스 미사용자 포함)</strong>이 착석 여부를 결정합니다.</p>
+              <div class="pt-1 text-[11px] text-indigo-900 font-medium flex items-start space-x-1">
+                <span class="font-bold flex-shrink-0">👥 대기열 보정:</span>
+                <span>피크 시간대에는 서비스 미사용 일반 통학생 및 봉담 방면 퇴근 시민 대기열이 사전에 자동 차감 반영됩니다.</span>
+              </div>
+            </div>
+          `;
         }
 
         // 1. 버스 판별 XAI Feature Attribution 카드 렌더링 (운행/도착 버스 없을 때 분기)
@@ -600,12 +614,12 @@
 
                 ${!isResv && bus.predictedSeatRange ? `
                 <!-- AI 예상 착석 가능 좌석 뱃지 -->
-                <div class="px-3 py-2 bg-gradient-to-r from-indigo-50 to-blue-50 rounded-xl border border-indigo-200 flex items-center justify-between text-xs">
+                <div class="px-3 py-2 ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'bg-gradient-to-r from-rose-50 to-amber-50 border-rose-300' : 'bg-gradient-to-r from-indigo-50 to-blue-50 border-indigo-200'} rounded-xl border flex items-center justify-between text-xs">
                   <div class="flex items-center space-x-1.5">
-                    <span class="w-2 h-2 rounded-full bg-indigo-600 animate-pulse"></span>
-                    <span class="font-bold text-indigo-900 text-[11px]">AI 예상 착석 가능 좌석</span>
+                    <span class="w-2 h-2 rounded-full ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'bg-rose-500 animate-ping' : 'bg-indigo-600 animate-pulse'}"></span>
+                    <span class="font-bold ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'text-rose-950' : 'text-indigo-900'} text-[11px]">AI 예상 착석 가능 좌석</span>
                   </div>
-                  <span class="font-black text-indigo-700 text-xs">${bus.predictedSeatRange}</span>
+                  <span class="font-black ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'text-rose-700' : 'text-indigo-700'} text-xs">${bus.predictedSeatRange}</span>
                 </div>
                 ` : ''}
 
