@@ -11,11 +11,6 @@ DATA_DIR = "data"
 SADANG_CSV_PATH = os.path.join(DATA_DIR, "sadang_telemetry.csv")
 UPSTREAM_CSV_PATH = os.path.join(DATA_DIR, "upstream_telemetry.csv")
 
-# 사당역 9번 출구(119000302) 출발 직후 통과하는 연속 체크포인트 정류소 ID
-# (남현동 경유 -> 과천진입 경유 -> 과천동행정복지센터 -> 대공원고가교 경유)
-# 폴링 주기 사이 버스가 빠르게 통과하더라도 100% 포착하며, 45분 쿨다운으로 동일 회차 중복 기록을 원천 방지합니다.
-# (남현동 경유 -> 과천진입 경유 -> 과천동행정복지센터 -> 대공원고가교 경유)
-# 폴링 주기 사이 버스가 빠르게 통과하더라도 100% 포착하며, 45분 쿨다운으로 동일 회차 중복 기록을 원천 방지합니다.
 SADANG_POST_DEPARTURE_STATION_IDS = {
     "277102049": "남현동(경유)",
     "277102291": "과천진입(경유)",
@@ -23,18 +18,15 @@ SADANG_POST_DEPARTURE_STATION_IDS = {
     "277103204": "대공원고가교(경유)",
 }
 
-# 각 체크포인트 통과 시점 대비 사당역 실제 출발 시각 오프셋(초) 보정 테이블
-# (원거리 체크포인트에서 최초 감지되더라도 사당역 출발 시각과 배차간격을 100% 실측 기준으로 복원)
+
 SADANG_CHECKPOINT_OFFSETS_SEC = {
-    "277102049": 60.0,   # 남현동 (~1분)
-    "277102291": 130.0,  # 과천진입 (~2.2분)
-    "220000009": 210.0,  # 과천동행정복지센터 (~3.5분)
-    "277103204": 300.0,  # 대공원고가교 (~5.0분)
+    "277102049": 60.0,   
+    "277102291": 130.0,  
+    "220000009": 210.0,  
+    "277103204": 300.0,  
 }
 
-# 상행 4대 핵심 정류장의 승차(카드 태그)가 100% 완료된 후 직후 정류장에 진입할 때의 매핑
-# GBIS fromStationId는 정류장 진입 순간(승차 전)에 갱신되므로, 직후 정류장 진입 시점에 측정해야
-# 해당 정류장에서 탑승한 승객이 잔여석(remainSeats)에 완전히 반영됩니다.
+
 UPSTREAM_POST_STATION_MAP = {
     "233002371": ("233002245", "효행초등학교정문"),  # 아이파크 진입 시 -> 효행초 승차 완료 확정
     "233002255": ("233002371", "아이파크정문"),      # 신명아파트 진입 시 -> 아이파크 승차 완료 확정
@@ -44,11 +36,11 @@ UPSTREAM_POST_STATION_MAP = {
 
 import json
 
-# 동일 차량(shortPlate)의 동일 운행 회차 중복 학습 방지용 쿨다운 레지스트리 (45분 = 2700초)
+
 TRIP_DEDUP_COOLDOWN_SEC = 2700.0
 DEDUP_CACHE_PATH = os.path.join(DATA_DIR, "trip_dedup_cache.json")
-_logged_sadang_trips: Dict[str, float] = {}     # {short_plate: timestamp}
-_logged_upstream_trips: Dict[str, float] = {}   # {f"{station_id}_{short_plate}": timestamp}
+_logged_sadang_trips: Dict[str, float] = {}     
+_logged_upstream_trips: Dict[str, float] = {}   
 _last_sadang_departure_time: float = 0.0
 _dedup_loaded: bool = False
 
@@ -135,7 +127,6 @@ def process_live_vehicles_for_learning(
     with TELEMETRY_LOCK:
         _load_dedup_cache()
         dirty_dedup = False
-        # 만료된 쿨다운 정리
         expired_s = [k for k, ts in _logged_sadang_trips.items() if now_epoch - ts > TRIP_DEDUP_COOLDOWN_SEC]
         for k in expired_s:
             _logged_sadang_trips.pop(k, None)
@@ -147,7 +138,6 @@ def process_live_vehicles_for_learning(
             dirty_dedup = True
 
         for v in live_vehicles:
-            # 전세/예약 버스는 일반 학생 탑승 대상이 아니므로 학습에서 제외
             if v.get("isReserved", False):
                 continue
 
@@ -164,21 +154,12 @@ def process_live_vehicles_for_learning(
             if remain_seats < 0 or remain_seats > total_seats:
                 continue
 
-            # =========================================================================
-            # [A] 사당역 9번 출구 출발 직후 체크포인트 포착 -> 실제 탑승 인원 역산 및 온라인 학습
-            # =========================================================================
-            # =========================================================================
-            # [A] 사당역 9번 출구 출발 직후 체크포인트 포착 -> 실제 탑승 인원 역산 및 온라인 학습
-            # =========================================================================
+
             if st_id in SADANG_POST_DEPARTURE_IDS_SET and plate not in _logged_sadang_trips:
                 actual_boarded = max(0, total_seats - remain_seats)
-
-                # ⭐ 체크포인트 정류소별 사당역 실제 출발 시각 오프셋 역산
-                # (대공원고가교 등 원거리에서 최초 감지되어도 실제 사당역 출발 시각을 정확히 복원)
                 offset_sec = SADANG_CHECKPOINT_OFFSETS_SEC.get(st_id, 90.0)
                 effective_dep_epoch = now_epoch - offset_sec
 
-                # 직전 사당역 출발 버스와의 실제 배차 간격(Headway) 산출
                 if _last_sadang_departure_time > 0:
                     gap_min = (effective_dep_epoch - _last_sadang_departure_time) / 60.0
                     headway_gap_min = max(4.0, min(35.0, gap_min))
@@ -198,7 +179,6 @@ def process_live_vehicles_for_learning(
                 fri_night = 1 if is_friday_night_window(now_dt.weekday(), t_float) else 0
                 checkpoint_name = SADANG_POST_DEPARTURE_STATION_IDS.get(st_id, st_id)
 
-                # 1. CSV 파일에 1행 즉시 추가
                 try:
                     with open(SADANG_CSV_PATH, "a", newline="", encoding="utf-8-sig") as f:
                         writer = csv.writer(f)
@@ -221,7 +201,6 @@ def process_live_vehicles_for_learning(
                 except Exception as e_csv:
                     print(f"[WARN] 사당역 텔레메트리 CSV 기록 오류: {e_csv}")
 
-                # 2. 실시간 온라인 머신러닝 모델 즉시 업데이트
                 try:
                     online_learner.learn_from_sadang_bus(
                         now_dt=now_dt,
@@ -240,10 +219,6 @@ def process_live_vehicles_for_learning(
                 except Exception as e_ml:
                     print(f"[WARN] 온라인 학습 업데이트 오류: {e_ml}")
 
-            # =========================================================================
-            # [B] 상행 4개 정류장(효행초·아이파크·신명·수원대) 통과 버스 누적 소진 좌석 온라인 학습
-            # (GBIS 특성상 직후 정류장에 진입했을 때 이전 정류장 승객 카드 태그가 100% 완료된 잔여석 반영)
-            # =========================================================================
             elif st_id in UPSTREAM_POST_STATION_MAP:
                 target_st_id, target_st_name = UPSTREAM_POST_STATION_MAP[st_id]
                 dedup_key = f"{target_st_id}_{plate}"

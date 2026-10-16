@@ -27,40 +27,28 @@ def is_charter_or_reserved_bus(
     short_plate: str = "",
     reservation_flag: str = ""
 ) -> Tuple[bool, str]:
-    """
-    7790번 운행 차량이 일반 정규 광역버스(탑승 가능)인지,
-    외부 임차 전세/예약버스(경기 79사/바/아/자, 9000번대 등 일반 학생 탑승 불가)인지 정밀 식별합니다.
 
-    [면허 체계 기준]:
-    - 경진여객 정규 노선 면허: 경기 70사(수원시), 경기 76아(화성시)
-    - 외부 임차 전세버스 면허: 경기 79사, 경기 79바, 경기 79아, 경기 79자 (및 경기 78사/바/아/자 등 전세버스조합 면허)
-    - 예약버스 식별 번호: 차량 뒤 4자리가 9000번대(9XXX)로 임시 배정된 차량
-    - GBIS/공공데이터 플래그: ROUTE_RESERVE_ID('233000384'), '예약' 노선명, reservation == 'Y'
-    """
     clean_plate = (plate_no or "").replace(" ", "")
     clean_short = (short_plate or "").replace(" ", "")
     if not clean_short and clean_plate:
         clean_short = clean_plate[-4:] if len(clean_plate) >= 4 else clean_plate
 
-    # 1. 공공데이터/GBIS 공식 예약 노선 ID 또는 명칭에 '예약'이 명시된 경우
+
     if str(route_id) == ROUTE_RESERVE_ID or ("예약" in str(route_name)):
         return True, "GBIS 공공데이터 예약 노선(233000384)으로 지정됨"
 
-    # 2. GBIS 실시간 차량 reservation 플래그
+
     if str(reservation_flag).upper() == "Y":
         return True, "GBIS 실시간 차량 예약(Reservation) 플래그 식별됨"
 
-    # 3. 경기도 전세버스 전용 면허 식별 (경기 79사, 경기 79바, 경기 79아, 경기 79자 등)
+
     charter_plate_markers = ["경기79", "79사", "79바", "79아", "79자", "경기78", "78사", "78바", "78아", "78자"]
     for marker in charter_plate_markers:
         if marker in clean_plate:
             return True, f"전세버스 면허('{marker}'): 외부 임차 전세 차량으로 식별됨 (정규 70사/76아 외 면허)"
-
-    # 서울 등 타 지자체 전세버스(서울 70사/바 등) 임차 차량 검사
     if any(m in clean_plate for m in ["서울70사", "서울70바", "서울70아", "서울70자"]):
         return True, f"외부 전세버스 면허('{clean_plate}'): 타 시도 임차 전세 차량"
 
-    # 4. 차량 번호 뒤 4자리가 9000번대인 경우 (출퇴근 전세버스 임시 식별 번호 대역)
     if clean_short.startswith("9"):
         return True, f"차량번호 '{clean_short}': 9000번대 외부 임차 전세버스 식별 번호"
 
@@ -68,10 +56,6 @@ def is_charter_or_reserved_bus(
 
 
 def fetch_gbis_route_cached(force_refresh: bool = False) -> Dict[str, Any]:
-    """
-    GBIS searchRouteJson 엔드포인트를 8초 인메모리 캐싱하여
-    도착 버스 조회와 실시간 도로교통 지연 분석(SHAP) 간의 중복 네트워크 I/O를 원천 차단합니다.
-    """
     global _CACHE_GBIS_ROUTE
     now = time.time()
     if not force_refresh and _CACHE_GBIS_ROUTE["data"] and (now - _CACHE_GBIS_ROUTE["timestamp"] < GBIS_ROUTE_CACHE_TTL):
@@ -92,7 +76,6 @@ def fetch_gbis_route_cached(force_refresh: bool = False) -> Dict[str, Any]:
 
 
 def fetch_full_route_stations() -> List[Dict[str, Any]]:
-    """GBIS에서 7790 전 노선 66개 정류장 수집"""
     try:
         res = fetch_gbis_route_cached(force_refresh=True)
         up_list = res.get("result", {}).get("gg", {}).get("up", {}).get("list", [])
@@ -162,7 +145,6 @@ def calc_realtime_traffic_delays(direction: str = "UP") -> List[Dict[str, Any]]:
         except (ValueError, TypeError):
             pass
 
-    # 실시간 기상 데이터 (화성 봉담 / 과천 / 사당 일대, 5분 캐시)
     if _CACHE_WEATHER["data"] and (now - _CACHE_WEATHER["timestamp"] < WEATHER_CACHE_TTL):
         weather_shap, weather_desc, weather_pct = _CACHE_WEATHER["data"]
     else:
@@ -190,7 +172,6 @@ def calc_realtime_traffic_delays(direction: str = "UP") -> List[Dict[str, Any]]:
             pass
 
     if direction == "DOWN":
-        # 하행 (수원대행)
         sadang_sec = sum(order_ptts.get(o, 60) for o in range(32, 35))
         sadang_delay = round(max(0.5, (sadang_sec - 180) / 60), 1)
 
@@ -212,7 +193,6 @@ def calc_realtime_traffic_delays(direction: str = "UP") -> List[Dict[str, Any]]:
             {"factor": "실시간 기상 및 도로 노면 상태", "shapValue": weather_shap, "percentage": weather_pct, "color": "bg-emerald-500", "desc": weather_desc}
         ]
     else:
-        # 상행 (사당역행)
         toll_sec = sum(order_ptts.get(o, 80) for o in range(19, 29))
         toll_delay = round(max(0.8, (toll_sec - 550) / 60), 1)
 

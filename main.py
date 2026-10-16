@@ -39,17 +39,14 @@ from services.gbis_client import (
 from services.online_learner import online_learner, is_friday_night_window
 from services.telemetry_logger import process_live_vehicles_for_learning
 
-# 스레드 안전한 디스크 파일 I/O 락
 FILE_IO_LOCK = threading.Lock()
 
-# GBIS 등 공공 SSL 인증서 자체서명 경고 콘솔 노이즈 억제
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _bg_learning_started = False
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI 최신 권장 lifespan 컨텍스트 매니저 (startup / shutdown)"""
     global CACHED_STATIONS, _bg_learning_started
     CACHED_STATIONS = fetch_full_route_stations()
     load_crowd_data_from_disk()
@@ -62,7 +59,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="7790 & Smart Transit Router", lifespan=lifespan)
 
-# ⭐ 외부 도메인 및 모바일 WebView 배포 대비 CORS 전면 허용
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -77,16 +73,12 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 CACHED_STATIONS = []
 
-# ⭐ 동시 접속자 급증 대비 고성능 백엔드 캐시 (공공데이터포털 쿼터 고갈 및 GBIS WAF 차단 방어)
 import time
-CACHE_BUS_ARRIVALS = {}      # {station_id: {"data": dict, "timestamp": float}}
-CACHE_XAI_ANALYSIS = {}      # {station_id: {"data": dict, "timestamp": float}}
-CROWD_REPORT_IP_RATE_LIMIT = {}  # {ip: [timestamps]} - 캠퍼스 Wi-Fi 분당 도배 방지
+CACHE_BUS_ARRIVALS = {}      
+CACHE_XAI_ANALYSIS = {}     
+CROWD_REPORT_IP_RATE_LIMIT = {}  
 
-# ⭐ 불감대(Deadband) 기반 좌석 예측 앵커링(Lock-in) 레지스트리
-# 버스가 기점에서 출발하여 타겟 정류장에 도달할 때까지, 정상 예측 오차 범위(Deadband) 내에서는
-# 숫자가 11석 -> 9석 -> 12석처럼 널뛰지(Jitter) 않도록 초기 예측값을 안정적으로 고정 유지합니다.
-# 만약 단체 승차 등으로 허용 오차 범위를 유의미하게 벗어나면(Out-of-bound) 즉시 새 기준으로 갱신(Re-anchor)합니다.
+
 PREDICTION_LOCK_REGISTRY = {}  # {f"{station_id}_{plate}": dict}
 
 def apply_prediction_deadband_lock(
@@ -103,13 +95,7 @@ def apply_prediction_deadband_lock(
     predict_min: int,
     is_resv: bool
 ):
-    """
-    [불감대(Deadband) & 히스테리시스 예측 앵커링 엔진]
-    기점에서 버스가 출발한 후 타겟 정류장까지 이동하는 동안,
-    실시간 산출 좌석수가 기존 예측 신뢰 구간 [lower_bound, upper_bound] 안에 들어오면
-    숫자 널뛰기(Jitter)를 방지하고 사용자 신뢰도를 극대화하기 위해 최초 예측값을 고정 유지합니다.
-    예측 범위를 벗어나는 급격한 승하차가 발생할 때만 새로운 현실로 Re-anchor합니다.
-    """
+
     global PREDICTION_LOCK_REGISTRY
     if is_resv or not plate:
         return new_expected, new_lower, new_upper, new_range, new_prob, new_status, new_color, new_decision
@@ -117,12 +103,10 @@ def apply_prediction_deadband_lock(
     now = time.time()
     lock_key = f"{station_id}_{plate}"
 
-    # 버스가 정류장에 진입 완료(1분 이하) 시 락 해제
     if predict_min <= 1:
         PREDICTION_LOCK_REGISTRY.pop(lock_key, None)
         return new_expected, new_lower, new_upper, new_range, new_prob, new_status, new_color, new_decision
 
-    # ⭐ [메모리 누수 방어] 20분(1200초) 이상 경과한 오래된 레코드 즉시 회수(eviction)
     expired_keys = [k for k, v in list(PREDICTION_LOCK_REGISTRY.items()) if now - v.get("timestamp", 0) > 1200]
     for k in expired_keys:
         PREDICTION_LOCK_REGISTRY.pop(k, None)
@@ -133,10 +117,8 @@ def apply_prediction_deadband_lock(
         locked_low = record["lower_bound"]
         locked_high = record["upper_bound"]
 
-        # ⭐ 핵심 검증: 실시간 계산치가 이전 예측 신뢰 구간(Deadband) 내에 머무르고 있는가?
         if locked_low <= new_expected <= locked_high:
-            # 정상 오차 범위 내의 미세 변동이므로 약속된 예측값을 고정 유지 (Jitter 방지)
-            record["timestamp"] = now  # 갱신 유지
+            record["timestamp"] = now 
             return (
                 record["locked_expected"],
                 record["lower_bound"],
@@ -148,10 +130,8 @@ def apply_prediction_deadband_lock(
                 record["decision_text"]
             )
         else:
-            # 🚨 예측 신뢰 구간 이탈(돌발 승하차/노선 급변 감지) -> 새 기준으로 재앵커링!
             pass
 
-    # 신규 앵커 등록 또는 허용 범위 이탈로 인한 새 기준점 수립
     PREDICTION_LOCK_REGISTRY[lock_key] = {
         "locked_expected": new_expected,
         "lower_bound": new_lower,
@@ -167,7 +147,6 @@ def apply_prediction_deadband_lock(
 
 
 def get_real_client_ip(request: Request) -> str:
-    """리버스 프록시(Nginx, Cloudflare, AWS, Render, ngrok 등) 환경에서 실제 클라이언트 IP 추출"""
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -188,7 +167,6 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
     global CACHED_STATIONS, CACHE_BUS_ARRIVALS
     now = time.time()
 
-    # 1. 고속 인메모리 캐시 확인 (6초 TTL): 다수 학우 동시 접속 시 공공데이터포털 쿼터 고갈 완벽 방어
     cached = CACHE_BUS_ARRIVALS.get(station_id)
     if cached and (now - cached["timestamp"] < BUS_CACHE_TTL):
         res = dict(cached["data"])
@@ -234,7 +212,6 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
                     if bus.get("predictTime1"):
                         plate = bus.get("plateNo1", "")
                         short_plate = plate[-4:] if len(plate) >= 4 else plate
-                        # 예약 노선이거나, 명칭에 예약이 있거나, 경기 79사 등 전세면허/9000번대 임차 전세버스 판별
                         is_resv, resv_reason = is_charter_or_reserved_bus(
                             route_id=route_id,
                             route_name=route_name,
@@ -274,7 +251,6 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
     except Exception as e:
         print(f"도착 API 오류: {e}")
 
-    # 2. 노선 전체 실시간 차량 위치 (통합 캐시 활용)
     try:
         live_data = fetch_gbis_route_cached()
         v_list = live_data.get("result", {}).get("realTime", {}).get("list", [])
@@ -282,7 +258,6 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
             plate_list = v.get("busNo", [])
             plate = plate_list[0] if plate_list else ""
             short_plate = plate[-4:] if len(plate) >= 4 else plate
-            # 경기 79사 전세 면허, reservation 플래그, 9천번대 임차 전세 정밀 판별
             is_reserved, resv_reason = is_charter_or_reserved_bus(
                 route_id=ROUTE_REGULAR_ID,
                 route_name="7790",
@@ -290,7 +265,6 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
                 short_plate=short_plate,
                 reservation_flag=v.get("reservation", "")
             )
-            # 카카오맵/GBIS 기준 실제 버스가 정차/출발한 현재 정류장(fromStationId)을 우선 매핑
             target_station = str(v.get("fromStationId") or v.get("toStationId") or "")
             
             live_vehicles.append({
@@ -305,7 +279,6 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
     except Exception as e:
         print(f"차량 API 오류: {e}")
 
-    # 공공데이터 API 도착 버스와 GBIS 실시간 차량 매칭하여 2층 버스 플래그 동기화
     for ab in arriving_buses:
         short = ab.get("shortPlate")
         matched = next((v for v in live_vehicles if v.get("shortPlate") == short), None)
@@ -314,7 +287,6 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
         elif "isDoubleDecker" not in ab:
             ab["isDoubleDecker"] = False
 
-    # ⭐ 3. 공공데이터 API 제한(기본 2대) 보완: 사당역 9번 출구(119000302)는 3대까지 실시간 추적 & 무중단 폴백
     max_track_count = 3 if str(station_id) == "119000302" else 2
     if len(arriving_buses) < max_track_count and live_vehicles:
         try:
@@ -339,7 +311,6 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
                     if not v_order:
                         continue
 
-                    # 사당역(order 33): 수원대에서 상행(U)으로 올라와 회차(order 31~32) 거쳐 사당역 9번 출구(order 33)로 오는 차량
                     if str(station_id) == "119000302":
                         if (v_dir == "U" and v_order <= 33) or (v_dir == "D" and v_order == 32):
                             rem_stops = max(1, 33 - v_order)
@@ -356,7 +327,6 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
                                 "isDoubleDecker": v.get("isDoubleDecker", False)
                             })
                     else:
-                        # 일반 정류장: 같은 방향(target_dir)이면서 정류장 앞서 실제로 다가오는 차량만 수집
                         if v_dir == target_dir and v_order <= target_order:
                             rem_stops = max(1, target_order - v_order)
                             ptts_sum = sum(order_ptts.get(o, 60) for o in range(v_order, target_order))
@@ -375,14 +345,12 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
                 candidates.sort(key=lambda x: x["predictTimeMin"])
                 needed = max_track_count - len(arriving_buses)
                 arriving_buses.extend(candidates[:needed])
-                # 실제 운행 중인 차량만 도착 예정 시간순 정렬
                 arriving_buses.sort(key=lambda x: x["predictTimeMin"])
         except Exception as e_fb:
             print(f"GBIS 실시간 3대 추적/폴백 산출 오류: {e_fb}")
 
     crowd_summary_data = get_crowd_summary(station_id=station_id)
 
-    # ⭐ [실시간 온라인 머신러닝 학습]: 사당역 출발 직후 체크포인트 및 상행 4개 정류장 통과 버스의 실제 탑승 인원 즉시 학습
     if live_vehicles:
         try:
             sadang_c_status = (
@@ -399,7 +367,6 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
         except Exception as e_learn:
             print(f"실시간 차량 온라인 학습 트리거 오류: {e_learn}")
 
-    # ⭐ 5대 주요 정류장(사당역9출, 수원대, 신명, 아이파크, 효행초)인 경우 XAI 예상 착석 좌석수 및 탑승 진단 즉시 부착
     if station_id in STATION_XAI_PROFILES and arriving_buses:
         try:
             exps, _ = calculate_bus_predictions(station_id, arriving_buses, live_vehicles, crowd_summary_data)
@@ -426,16 +393,10 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
 
 
 def _background_telemetry_learning_loop():
-    """
-    [24시간 전 요일·전 시간대 자율 학습 백그라운드 데몬]
-    사용자가 앱을 열어두지 않은 시간대에도 25초 주기로 GBIS 실시간 차량 위치를 감시하여,
-    버스가 사당역 및 주요 정류장을 통과할 때마다 실제 탑승 인원을 역산하고 모델을 실시간 학습시킵니다.
-    """
     time.sleep(5)
     while True:
         try:
             now_dt = get_kst_now()
-            # 7790 운행 시간대 (04:50 ~ 익일 01:30) 전 시간대 감시
             if now_dt.hour >= 5 or now_dt.hour < 2:
                 live_data = fetch_gbis_route_cached()
                 v_list = live_data.get("result", {}).get("realTime", {}).get("list", [])
@@ -473,7 +434,6 @@ def _background_telemetry_learning_loop():
             print(f"[WARN] 백그라운드 온라인 학습 루프 오류: {e_bg}")
         time.sleep(25)
 
-# ⭐ 정류장별 학우 실시간 제보 영구 보존 및 IP 도배 방지 쿨다운
 CROWD_DATA_FILE = "crowd_reports_cache.json"
 CROWD_REPORTS_BY_STATION = {}
 CROWD_REPORT_IP_COOLDOWN = {}  # {ip: timestamp}
@@ -541,7 +501,6 @@ def report_crowd(
     now = time.time()
     global CROWD_REPORTS_BY_STATION, CROWD_REPORT_IP_COOLDOWN, CACHE_BUS_ARRIVALS, CACHE_XAI_ANALYSIS
 
-    # 1. 제보 등록 시점 해당 정류장 첫 번째 도착 예정 버스 정보 조회
     target_bus_plate = ""
     target_eta_min = 5
     cached = CACHE_BUS_ARRIVALS.get(station_id)
@@ -556,28 +515,19 @@ def report_crowd(
         if arrs:
             target_bus_plate = arrs[0].get("shortPlate", "")
             target_eta_min = arrs[0].get("predictTimeMin", 5)
-
-    # ⭐ 학우 요청 반영: 첫 번째 도착 예정 버스 잔여시간 연동 동적 쿨다운
-    # - 최소 2분 (120초): 버스가 0~1분 전이어도 연타 도배 방지
-    # - 최대 10분 (600초): 학우 요청 최대 10분 상한선 설정
     if target_eta_min <= 1:
-        dynamic_cooldown = 120  # 2분 (다음 버스 대기열 제보 준비)
+        dynamic_cooldown = 120 
     else:
-        dynamic_cooldown = max(120, min(target_eta_min * 60, 600))  # 최대 10분(600초)
-
-    # 2. 하이브리드 Rate Limit: 개인 UUID 식별 + 캠퍼스 Wi-Fi IP 분당 총량 제한
+        dynamic_cooldown = max(120, min(target_eta_min * 60, 600))  
     client_ip = get_real_client_ip(request)
     client_uuid = request.headers.get("x-client-id", "").strip()
     user_id = client_uuid if client_uuid else client_ip
     cooldown_key = f"{user_id}_{station_id}"
 
     with CROWD_STATE_LOCK:
-        # ⭐ [메모리 누수 방어] 60초 이상 경과한 IP 항목 및 빈 히스토리 즉시 회수(eviction)
         expired_ips = [ip for ip, hist in list(CROWD_REPORT_IP_RATE_LIMIT.items()) if not hist or (now - hist[-1] >= 60)]
         for ip in expired_ips:
             CROWD_REPORT_IP_RATE_LIMIT.pop(ip, None)
-
-        # 2-1. 공인 IP 기준 분당 총량 제한 (스크립트/도배 방어, 캠퍼스 Wi-Fi 고려 분당 최대 8건)
         ip_history = CROWD_REPORT_IP_RATE_LIMIT.get(client_ip, [])
         ip_history = [t for t in ip_history if now - t < 60]
         if len(ip_history) >= 8:
@@ -588,7 +538,6 @@ def report_crowd(
                 "stationId": station_id
             }
 
-        # 2-2. 개인별(UUID/기기) 정류장 쿨다운 검사
         last_record = CROWD_REPORT_IP_COOLDOWN.get(cooldown_key)
         if isinstance(last_record, dict):
             last_time = last_record.get("time", 0)
@@ -618,7 +567,6 @@ def report_crowd(
         if station_id not in CROWD_REPORTS_BY_STATION:
             CROWD_REPORTS_BY_STATION[station_id] = []
 
-        # 최근 10분(600초) 제보 보존 (최대 10분 락 및 점진 감쇄 지원)
         CROWD_REPORTS_BY_STATION[station_id] = [r for r in CROWD_REPORTS_BY_STATION[station_id] if now - r["time"] < 600]
         CROWD_REPORTS_BY_STATION[station_id].append({
             "status": status,
@@ -628,11 +576,8 @@ def report_crowd(
         })
         CROWD_REPORT_IP_COOLDOWN[cooldown_key] = {"time": now, "duration": dynamic_cooldown}
 
-    # ⭐ 디스크 영구 저장 (서버 재부팅/재배포 시에도 제보 보존)
     save_crowd_data_to_disk()
 
-    # ⭐ 공공데이터 도착 캐시(CACHE_BUS_ARRIVALS)는 유지하여 쿼터 방어!
-    # 제보 정류장 및 연관 상행선 XAI 분석 캐시만 선택적으로 무효화
     CACHE_XAI_ANALYSIS.pop(station_id, None)
     if station_id in ["233002245", "233002371", "233002255", "233003021"]:
         for st in ["233002245", "233002371", "233002255", "233003021"]:
@@ -653,12 +598,8 @@ def get_crowd_summary(station_id="119000302"):
     with CROWD_STATE_LOCK:
         reports = list(CROWD_REPORTS_BY_STATION.get(station_id, []))
 
-    # 1. 5분(300초) 이내 신선한 제보
     fresh_reports = [r for r in reports if now - r["time"] < 300]
-    # 2. 5분~10분(600초) 이전 제보 (버스 미도착 상태 잔류 대기열 검사용, 최대 10분)
     older_reports = [r for r in reports if 300 <= (now - r["time"]) < 600]
-
-    # 정류장 현재 첫 번째 도착 예정 버스 조회
     curr_first_plate = ""
     curr_first_min = 999
     cached_buses = CACHE_BUS_ARRIVALS.get(station_id)
@@ -677,16 +618,14 @@ def get_crowd_summary(station_id="119000302"):
         last_r = older_reports[-1]
         age_sec = now - last_r["time"]
         target_plate = last_r.get("targetPlate", "")
-        # ⭐ 핵심: 직전 제보 당시 타겟 버스가 아직 안 왔거나, 첫 차가 오고 있는 중(curr_first_min > 1)
         bus_not_arrived_yet = (target_plate and target_plate == curr_first_plate) or (curr_first_min > 1)
 
         if last_r["status"] in ["crowded", "moderate"] and bus_not_arrived_yet:
-            # 승객이 아직 버스에 타지 못했으므로 혼잡 대기열을 유지(Lock)하되 반감기 점진 감쇄 적용 (최대 10분)!
             is_sticky = True
             valid_reports = [last_r]
-            if age_sec < 450:       # 5~7.5분: 85% 잔류
+            if age_sec < 450:     
                 sticky_decay_factor = 0.85
-            else:                   # 7.5~10분: 70% 잔류
+            else:                  
                 sticky_decay_factor = 0.70
         else:
             valid_reports = []
@@ -706,12 +645,6 @@ def get_crowd_summary(station_id="119000302"):
             st_name = "해당 정류장"
             is_down = (str(station_id) == "119000302")
 
-    # ⭐ 방향별 피크 시간대 판별:
-    # 1) 사당역 9번 출구 (하행 DOWN, 수원대행):
-    #    - 평일 아침 등교 피크 (07:30 ~ 10:10)
-    #    - 평일 오후 퇴근 피크 (16:30 ~ 19:30)
-    #    - 금요일 불금 심야 피크 (금 21:30 ~ 토 00:40 막차까지)
-    # 2) 수원대입구/신명/아이파크/효행초 (상행 UP, 사당역행): 평일 오후 하교 피크 (15:25 ~ 17:30)
     now_dt = get_kst_now()
     time_float = now_dt.hour + now_dt.minute / 60.0
     weekday = now_dt.weekday()  # 0:월 ~ 4:금, 5:토, 6:일
@@ -820,25 +753,21 @@ def get_crowd_summary(station_id="119000302"):
             "stickyDecayFactor": 1.0
         }
 
-# ⭐ 사당역 9번 출구(하행 수원대행) 학우 제보 부재 시 자동 작동하는
-# 수원대학교 강의 시간표, 불금 심야 귀가 패턴 및 실시간 온라인 머신러닝 융합 모델
 def estimate_sadang_waiters_by_time(apply_online_ml: bool = True, is_double_decker: bool = False):
     now_dt = get_kst_now()
     hour = now_dt.hour
     minute = now_dt.minute
-    weekday = now_dt.weekday()  # 0:월, 1:화, ..., 4:금, 5:토, 6:일
+    weekday = now_dt.weekday() 
     time_float = hour + minute / 60.0
 
-    # 0. 금요일 밤이 자정을 넘어 토요일 새벽(00:00 ~ 00:40)이 된 경우: 00:30 막차 귀가 처리
     if weekday == 5 and time_float <= 0.67:
         base = 55
-        est = int(round(base * 1.15))  # 약 63명 (1층 만석 초과, 2층 경합)
+        est = int(round(base * 1.15)) 
         desc = "사당역 00:30 막차 귀가 시간대 (지하철 환승 및 귀가객 집중)"
         if apply_online_ml:
             est, desc, _ = online_learner.predict_sadang_waiters(now_dt, est, desc, is_double_decker=is_double_decker)
         return est, desc
 
-    # 평일 자정 직후(화~금 00:00 ~ 00:38): 전날 밤 사당역 00:30 막차 귀가 시간대
     if weekday in [1, 2, 3, 4] and time_float <= 0.65:
         est = 25
         desc = "사당역 00:30 심야 막차 귀가 시간대 (비사용자 집중)"
@@ -846,7 +775,6 @@ def estimate_sadang_waiters_by_time(apply_online_ml: bool = True, is_double_deck
             est, desc, _ = online_learner.predict_sadang_waiters(now_dt, est, desc, is_double_decker=is_double_decker)
         return est, desc
 
-    # 1. 주말 (토/일 일반 시간대)
     if weekday >= 5:
         if 11 <= hour <= 19:
             est, desc = 9, "주말 일반 통행 분산 (일반 승객 포함)"
@@ -858,10 +786,6 @@ def estimate_sadang_waiters_by_time(apply_online_ml: bool = True, is_double_deck
             est, desc, _ = online_learner.predict_sadang_waiters(now_dt, est, desc, is_double_decker=is_double_decker)
         return est, desc
 
-    # 2. 평일 요일×시간대 정밀 가중치 분리:
-    # - 금요일 오전(07:30~12:00): '금공강' 효과로 등교 인원 감축 (0.70배)
-    # - 금요일 오후/퇴근(12:00~21:30): 조기 퇴근 및 약속 이동 반영 (1.0배)
-    # - 🔥 금요일 불금 심야(21:30~24:00): 서울(강남/홍대/사당) 모임 후 귀가객 폭증 (1.15배 가중)
     if weekday == 4:
         if time_float >= 21.5:
             day_multiplier = 1.15
@@ -946,16 +870,10 @@ def estimate_sadang_waiters_by_time(apply_online_ml: bool = True, is_double_deck
 
 
 def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, crowd_info: dict) -> tuple[list, bool]:
-    """
-    정류장별 실시간 도착 버스의 XAI 좌석수 및 착석 확률을 도메인 휴리스틱 및 신뢰구간 불감대(Deadband) 모델로 산출합니다.
-    (/api/buses 및 /api/xai-analysis 양쪽에서 단일 엔진으로 공유)
-    """
     profile = STATION_XAI_PROFILES.get(station_id, STATION_XAI_PROFILES["119000302"])
     is_down = (profile["dir"] == "DOWN")
     is_morning_rush = crowd_info.get("isMorningRush", False)
     is_afternoon_rush = crowd_info.get("isAfternoonRush", False)
-
-    # 상행(사당행) 효행초등학교(233002245) 선행 제보 및 실시간 잔여석 급감 사전 검사
     is_hyohaeng_surge = False
     if not is_down:
         hyohaeng_summary = get_crowd_summary(station_id="233002245")
@@ -963,16 +881,11 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
         if h_st in ["crowded", "moderate"]:
             is_hyohaeng_surge = True
         else:
-            # ⭐ 학우 피드백 반영: 제보가 없더라도 효행초(seq <= 11) 구간을 통과한 직후 버스의 잔여석이
-            # 45석 -> 35석 이하(또는 2층 58석 이하)로 이미 크게 소진되었다면,
-            # 뒤따르는 아이파크/수원대에 엄청난 대기열이 집중되어 있다는 실측 시그널!
             st_seq_map = {str(s["id"]): s.get("seq", 999) for s in CACHED_STATIONS if s.get("dir") == "UP"}
             for v in vehicles:
                 if v.get("dir") == "U":
                     curr_st = str(v.get("currentStationId", ""))
                     v_seq = st_seq_map.get(curr_st, 999)
-                    # 효행초 정류장 부근(기점 ~ 효행초 직후 seq <= 11)에 있는 차량만 검사!
-                    # (이미 수원대를 지나 과천/사당 다 와가는 버스는 잔여석이 당연히 적으므로 제외)
                     if v_seq <= 11:
                         rem = v.get("remainSeats", 45)
                         is_dd = v.get("isDoubleDecker", False)
@@ -1020,12 +933,6 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
             seat_range = None
         else:
             crowd_status = crowd_info.get("status", "none")
-
-            # --- [개선] 상행 연쇄 전파 & 효행초 조기 포화(역주행 탑승) 연쇄 증폭 모델 ---
-            # 💡 사용자 피드백 반영:
-            # 1. 효행초 조기 포화 감지 시(역주행 탑승): 뒤따르는 아이파크/신명/수원대 좌석 차감 가중치 대폭 증폭
-            # 2. 안내 문구에서는 복잡한 차감 계산식/수치를 비노출하고 직관적인 상태 설명형 자연어 제공
-            # 3. 2층 버스(71석) vs 1층 버스(45석) 차종 스펙 완벽 명시
             upstream_consumed = 0
 
             is_double = b.get("isDoubleDecker", False)
@@ -1033,10 +940,6 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
 
             if not is_down:
                 current_seq = profile.get("seq", 16)
-                # ⭐ [알고리즘 정확도 혁신] GBIS 차량 위치(currentStationId) 기반 실제 seq 결정 및 스케일 불일치 해소
-                # 공공데이터 API의 remainStations는 '정차 정류장 수' 기준이라 UPSTREAM_STATION_CHAIN의 실제 노선 seq(10, 12, 14, 16)와 스케일이 불일치함
-                # 1순위: vehicles 리스트에서 해당 차량(shortPlate)의 currentStationId를 찾아 CACHED_STATIONS의 실제 seq 매핑
-                # 2순위: 미매칭 시 fallback으로 remainStations 기반 상대 체인 인덱스 계산
                 matched_v = next((v for v in vehicles if v.get("shortPlate") == plate), None)
                 bus_actual_seq = None
                 if matched_v and matched_v.get("currentStationId"):
@@ -1047,18 +950,16 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
 
                 if bus_actual_seq is None:
                     rem_stations = b.get("remainStations", 1)
-                    # UPSTREAM 체인 간격이 약 2씩 차이나므로 스케일 보정
                     bus_actual_seq = max(1, current_seq - (rem_stations * 2))
 
                 for up_node in UPSTREAM_STATION_CHAIN:
-                    # 버스가 아직 도달하지 않은 정류장이면서 탑승 정류장보다 앞선 정류장만 차감!
                     if bus_actual_seq <= up_node["seq"] < current_seq:
                         st_id = up_node["id"]
                         up_summary = get_crowd_summary(station_id=st_id)
                         u_st = up_summary.get("status", "none")
-                        u_conf = up_summary.get("confidence", 1.0)  # 신뢰도 가중치 (1건 70%, 2건 이상 100%)
+                        u_conf = up_summary.get("confidence", 1.0)
 
-                        if st_id == "233002245":  # 효행초등학교 (기점 10번째)
+                        if st_id == "233002245":  
                             if u_st == "crowded":
                                 c_seats = 12
                             elif u_st == "moderate":
@@ -1068,13 +969,12 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                             else:
                                 c_seats = 4 if is_afternoon_rush else 1
 
-                        elif st_id == "233002371":  # 아이파크정문 (하교 피크 최다 승차 1위)
+                        elif st_id == "233002371": 
                             if is_hyohaeng_surge:
-                                # 🚨 효행초 역주행 급증 시 아이파크 차감 가중치 폭증 (초포화 연쇄 전파)
                                 if u_st == "crowded":
-                                    c_seats = 24  # 학우 피드백: 제보 접수 시 대폭 추가 차감
+                                    c_seats = 24 
                                 elif u_st == "moderate":
-                                    c_seats = 16  # 보통 제보 시 16석 차감
+                                    c_seats = 16 
                                 elif u_st == "smooth":
                                     c_seats = 6
                                 else:
@@ -1089,10 +989,10 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                                 else:
                                     c_seats = 6 if is_afternoon_rush else 2
 
-                        else:  # 신명아파트 (수원대 직전)
+                        else:  
                             if is_hyohaeng_surge:
                                 if u_st == "crowded":
-                                    c_seats = 9  # 제보 접수 시 추가 차감
+                                    c_seats = 9  
                                 elif u_st == "moderate":
                                     c_seats = 6
                                 else:
@@ -1107,16 +1007,11 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                                 else:
                                     c_seats = 2 if is_afternoon_rush else 1
 
-                        # 단일 제보 시 70% 신뢰도 가중치 적용하여 과민 차감 방지
                         if u_st in ["crowded", "moderate", "smooth"]:
                             c_seats = max(1, int(round(c_seats * u_conf)))
 
                         upstream_consumed += c_seats
 
-                # ⭐ 상행 정류장 실시간 온라인 학습 데이터 융합 (이중 차감 방지 스케일링)
-                # online_learner는 기점부터 해당 정류장까지의 총 누적 소진 좌석(full_chain)을 학습하므로,
-                # 버스가 이미 중간 정류장을 지나 실시간 잔여석(seats)에 선행 승차가 이미 반영된 경우,
-                # 남은 잔여 구간 비율(remaining_ratio)만큼만 스케일링하여 이중 차감을 원천 차단합니다.
                 if upstream_consumed > 0:
                     full_chain_default = sum(
                         (15 if node["id"] == "233002371" else (6 if node["id"] == "233002245" else 6))
@@ -1133,13 +1028,9 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                     else:
                         upstream_consumed = min(upstream_consumed, learned_full)
 
-            # 앞 정류장 선소진을 차감한 실질 잔여 좌석
             effective_seats = max(0, seats - upstream_consumed) if not is_down else seats
 
             if is_down:
-                # [사당역 9번 출구 (하행 수원대행)]:
-                # 💡 사당역은 회차 정류장으로 승객 전원 하차 후 '전석 빈 차'로 진입하므로
-                # 실제 총 수용 좌석은 2층 버스 71석, 1층 버스 45석입니다.
                 eval_seats = 71 if is_double else 45
 
                 is_sticky = crowd_info.get("isSticky", False)
@@ -1148,7 +1039,6 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                 is_friday_night = crowd_info.get("isFridayNight", False)
 
                 if crowd_status == "smooth":
-                    # 피크 시간대에는 제보자가 '여유'를 눌러도 비사용자 및 일반 시민 기본 대기열이 존재
                     if is_friday_night:
                         est_waiters = 22
                         crowd_desc = f"학우 실시간 제보(여유) + 심야 귀가객 대기열: 약 {est_waiters}명 차감 반영"
@@ -1185,7 +1075,6 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                                   f"직전 혼잡 제보 잔류 + {'심야 막차 대기열' if is_friday_night else '비사용자'} 대기열: 약 {est_waiters}명 대폭 차감 반영")
                     is_from_report = True
                 else:
-                    # ⭐ 실시간 제보 부재 시: 수원대 통학 시간표·불금 심야 모델 및 실시간 온라인 머신러닝 모델 가동
                     est_waiters, time_slot_desc = estimate_sadang_waiters_by_time(
                         apply_online_ml=True,
                         is_double_decker=is_double
@@ -1200,7 +1089,6 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                     if sadang_conf < 1.0:
                         est_waiters = max(5, int(round(est_waiters * sadang_conf)))
 
-                # 2번째, 3번째 버스일 경우: 앞선 버스 승차 후 잔여 대기열 이월 및 후속 유입 반영
                 if idx > 1 and len(target_list) >= idx:
                     prev_bus = target_list[idx - 2]
                     prev_cap = 0 if prev_bus.get("isReserved") else (71 if prev_bus.get("isDoubleDecker") else 45)
@@ -1214,7 +1102,6 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
 
                 prev_bus_waiters = est_waiters
 
-                # 사당역 진입 버스(빈 차 45석 또는 71석)와 비사용자 포함 대기열 간 착석 성공률 계산
                 seat_diff = eval_seats - est_waiters
 
                 if seat_diff >= 15:
@@ -1238,7 +1125,6 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                     boarding_status = "만석 확실 (다음 차 대기 필수)"
                     prob_color = "rose"
 
-                # 설명 문구 생성 (2층/1층 버스 스펙 완벽 결합, 비사용자 사전 차감 반영 명시)
                 if is_from_report:
                     sticky_tag = " (직전 제보 승차 대기 중)" if is_sticky else ""
                     if seat_diff >= 15:
@@ -1319,27 +1205,25 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                     tft_crowd_weight = 46
                     crowd_desc = f"신명아파트 대기열(약 {est_waiters}명) 및 잔여 좌석 분석"
 
-                else:  # 수원대입구 (233003021, 기점 16번째 - 학생 하교 최다 정류장)
-                    # 💡 사용자 피드백 반영: 악의적/허위 제보로 인한 왜곡 방지를 위해
-                    # 수원대 제보 가중치를 소폭 완화(Damping)하고 대기열 차감 수치를 완만하게 조정
+                else: 
                     is_sticky = crowd_info.get("isSticky", False)
                     decay_fac = crowd_info.get("stickyDecayFactor", 1.0)
 
                     if is_afternoon_rush:
                         if is_hyohaeng_surge:
                             if crowd_status == "crowded":
-                                est_waiters = int(round(32 * decay_fac))  # 완화 (기존 40명 -> 32명)
+                                est_waiters = int(round(32 * decay_fac)) 
                             elif crowd_status == "moderate":
-                                est_waiters = int(round(22 * decay_fac))  # 완화 (기존 28명 -> 22명)
+                                est_waiters = int(round(22 * decay_fac)) 
                             elif crowd_status == "smooth":
                                 est_waiters = 10
                             else:
                                 est_waiters = 18
                         else:
                             if crowd_status == "crowded":
-                                est_waiters = int(round(22 * decay_fac))  # 완화 (기존 28명 -> 22명)
+                                est_waiters = int(round(22 * decay_fac)) 
                             elif crowd_status == "moderate":
-                                est_waiters = int(round(15 * decay_fac))  # 완화 (기존 18명 -> 15명)
+                                est_waiters = int(round(15 * decay_fac)) 
                             elif crowd_status == "smooth":
                                 est_waiters = 7
                             else:
@@ -1348,28 +1232,26 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                         # 평상시 완화 차감치
                         if is_hyohaeng_surge:
                             if crowd_status == "crowded":
-                                est_waiters = int(round(24 * decay_fac))  # 완화 (기존 32명 -> 24명)
+                                est_waiters = int(round(24 * decay_fac)) 
                             elif crowd_status == "moderate":
-                                est_waiters = int(round(15 * decay_fac))  # 완화 (기존 20명 -> 15명)
+                                est_waiters = int(round(15 * decay_fac))  
                             elif crowd_status == "smooth":
                                 est_waiters = 5
                             else:
                                 est_waiters = 8
                         else:
                             if crowd_status == "crowded":
-                                est_waiters = int(round(18 * decay_fac))  # 완화 (기존 24명 -> 18명)
+                                est_waiters = int(round(18 * decay_fac))  
                             elif crowd_status == "moderate":
-                                est_waiters = int(round(11 * decay_fac))  # 완화 (기존 14명 -> 11명)
+                                est_waiters = int(round(11 * decay_fac))  
                             elif crowd_status == "smooth":
                                 est_waiters = 4
                             else:
-                                est_waiters = 6   # 평상시 기본치
+                                est_waiters = 6   
 
-                    # 실질 잔여좌석과 수원대 대기열 간의 실질 경합 계산 (대기열 차감)
                     seat_diff = effective_seats - est_waiters
 
                     is_from_report = (crowd_status in ["crowded", "moderate", "smooth"])
-                    # 악용 방지: 수원대 제보 가중치를 기존 54%에서 40%로 소폭 하향 조정
                     tft_crowd_weight = 40 if is_from_report else 35
                     crowd_desc = f"학우 실시간 제보({crowd_info['statusText']}): 수원대 대기열 분석 (신뢰 완충)" if is_from_report else "수원대 대기열 및 잔여 좌석 종합 분석"
 
@@ -1426,7 +1308,6 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                             delta = 5
                             decision_text = f"차량('{plate}', {bus_type_title})은 현재 잔여 {seats}석이나, 앞선 정류장 승차 누적으로 수원대 도착 시 만석이 될 수 있어 다음 차 대기를 고려하세요.{surge_warn}"
 
-            # 95% 착석 신뢰구간 수학적 계산 (실질 잔여좌석 기준)
             eval_seats = effective_seats if not is_down else (71 if is_double else 45)
             seat_expected = max(0, eval_seats - est_waiters)
             lower_bound = max(0, seat_expected - delta)
@@ -1439,7 +1320,6 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
             else:
                 seat_range = "0석 (만석 대기)" if is_down else "0석 (만석)"
 
-            # ⭐ [불감대(Deadband) 앵커링 엔진] 정상 예측 오차 범위 내 숫자 널뛰기(Jitter) 방지 및 일관성 보장
             (
                 seat_expected,
                 lower_bound,
@@ -1495,7 +1375,6 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
     return bus_explanations, is_hyohaeng_surge
 
 
-# ⭐ 3. 정류장별 XAI 탑승 및 실시간 도로교통 지연 분석 엔드포인트 (도메인 휴리스틱 + 실시간 온라인 머신러닝 + 불감대 모델)
 @app.get("/api/xai-analysis")
 def get_xai_analysis(station_id: str = Query("119000302")):
     global CACHE_XAI_ANALYSIS
@@ -1557,7 +1436,6 @@ def get_ml_status():
         "onlineLearning": online_learner.get_status_summary()
     }
 
-# ⭐ 4. 7790번 운행 시간표 및 MiRi 전세 예약버스 API
 @app.get("/api/timetable")
 def get_timetable():
     """7790번 첫차/막차, 배차간격, MiRi 예약버스 고정 시간표"""
@@ -1566,7 +1444,6 @@ def get_timetable():
         **TIMETABLE_INFO
     }
 
-# 브라우저 PWA /sw.js 404 방지 더미 엔드포인트
 @app.get("/sw.js")
 def get_service_worker():
     return Response(content="// no-op service worker", media_type="application/javascript")
