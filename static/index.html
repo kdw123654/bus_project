@@ -109,7 +109,7 @@
           <span class="text-xs font-black text-gray-800 tracking-tight">탑승 정류장</span>
         </div>
         <span id="selectedStationBadge"
-          class="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full">
+          class="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full whitespace-nowrap flex-shrink-0">
           사당역 9출 (수원대행)
         </span>
       </div>
@@ -120,7 +120,7 @@
             class="text-[9px] font-black text-blue-600 mb-0.5 text-center flex items-center justify-center space-x-0.5">
           </div>
           <button onclick="selectStation('119000302', '사당역9번출구앞', 'DOWN')" id="stChip_119000302"
-            class="station-chip py-1.5 px-2.5 rounded-lg text-[11px] font-black transition bg-blue-600 text-white shadow-xs whitespace-nowrap text-center">
+            class="station-chip py-1.5 px-2 sm:px-2.5 rounded-lg text-[10.5px] sm:text-[11px] font-black transition bg-blue-600 text-white shadow-xs whitespace-nowrap text-center flex-shrink-0">
             사당역 9출
           </button>
         </div>
@@ -135,19 +135,19 @@
           </div>
           <div class="grid grid-cols-4 gap-1 text-center">
             <button onclick="selectStation('233003021', '수원대입구', 'UP')" id="stChip_233003021"
-              class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 text-center truncate">
+              class="station-chip py-1.5 px-0.5 rounded-lg text-[10.5px] sm:text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 text-center truncate whitespace-nowrap">
               수원대
             </button>
             <button onclick="selectStation('233002255', '신명아파트', 'UP')" id="stChip_233002255"
-              class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 text-center truncate">
+              class="station-chip py-1.5 px-0.5 rounded-lg text-[10.5px] sm:text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 text-center truncate whitespace-nowrap">
               신명
             </button>
             <button onclick="selectStation('233002371', '아이파크정문', 'UP')" id="stChip_233002371"
-              class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 text-center truncate">
+              class="station-chip py-1.5 px-0.5 rounded-lg text-[10.5px] sm:text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 text-center truncate whitespace-nowrap">
               아이파크
             </button>
             <button onclick="selectStation('233002245', '효행초등학교정문', 'UP')" id="stChip_233002245"
-              class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 text-center truncate">
+              class="station-chip py-1.5 px-0.5 rounded-lg text-[10.5px] sm:text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 text-center truncate whitespace-nowrap">
               효행초
             </button>
           </div>
@@ -163,18 +163,18 @@
           <h1 class="text-2xl font-black text-gray-900 tracking-tight">7790</h1>
           <span class="text-xs text-gray-400 font-medium">실시간 운행</span>
         </div>
-        <div class="flex items-center space-x-1.5">
+        <div class="flex items-center space-x-1.5 flex-shrink-0">
           <button onclick="openTimetableModal()"
-            class="text-[11px] font-bold px-2.5 py-1.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 flex items-center space-x-1 shadow-xs transition">
+            class="text-[10.5px] sm:text-[11px] font-bold px-2 sm:px-2.5 py-1.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 flex items-center space-x-1 shadow-xs transition whitespace-nowrap flex-shrink-0">
             <span>📅</span>
             <span>시간표</span>
           </button>
           <button onclick="scrollToTarget()" id="quickScrollBtn"
-            class="text-[11px] bg-blue-50 text-blue-600 font-bold px-2 py-1.5 rounded-full border border-blue-200 truncate max-w-[80px]">
+            class="text-[10.5px] sm:text-[11px] bg-blue-50 text-blue-600 font-bold px-2 py-1.5 rounded-full border border-blue-200 truncate max-w-[85px] whitespace-nowrap flex-shrink-0">
             사당역 9출
           </button>
           <button onclick="fetchBusData()" id="refreshBtn"
-            class="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600">
+            class="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600 flex-shrink-0">
             🔄
           </button>
         </div>
@@ -182,12 +182,12 @@
 
       <section class="p-4 bg-gray-50/80 border-b border-gray-200">
         <div class="flex justify-between items-center mb-2.5">
-          <div class="flex items-center space-x-1.5">
-            <span class="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span>
-            <h2 class="text-sm font-bold text-gray-800" id="currentStationTitle">사당역9번출구앞 <span
+          <div class="flex items-center space-x-1.5 min-w-0 mr-2">
+            <span class="w-2 h-2 rounded-full bg-blue-500 animate-ping flex-shrink-0"></span>
+            <h2 class="text-xs sm:text-sm font-bold text-gray-800 truncate" id="currentStationTitle">사당역9번출구앞 <span
                 class="text-xs font-normal text-gray-500">(수원대행)</span> 실시간 도착</h2>
           </div>
-          <span class="text-[11px] text-gray-400" id="updateTime">15초 자동 갱신</span>
+          <span class="text-[10px] sm:text-[11px] text-gray-400 whitespace-nowrap flex-shrink-0" id="updateTime">15초 자동 갱신</span>
         </div>
         <div id="arrivalCards" class="space-y-2">
           <div class="text-xs text-gray-400 text-center py-2 animate-pulse">도착 정보 조회 중...</div>
@@ -196,16 +196,16 @@
         <!-- 정류장별 학우 실시간 1초 대기열 제보 및 현황판 (모든 정류장 지원) -->
         <div id="routeCrowdCard" class="mt-3 p-3.5 bg-white rounded-xl border border-blue-200 shadow-xs space-y-2.5">
           <div class="flex justify-between items-center">
-            <div class="flex items-center space-x-1.5">
-              <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div class="flex items-center space-x-1.5 min-w-0 mr-1.5">
+              <svg class="w-4 h-4 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
               </svg>
-              <span id="routeCrowdTitle" class="text-xs font-black text-gray-900 tracking-tight">사당역 9번 출구 대기열 실시간
+              <span id="routeCrowdTitle" class="text-xs font-black text-gray-900 tracking-tight truncate">사당역 9번 출구 대기열 실시간
                 현황</span>
             </div>
             <span id="rushHourBadge"
-              class="hidden text-[10px] bg-amber-50 text-amber-800 font-bold px-2 py-0.5 rounded-full border border-amber-300">
+              class="hidden text-[9.5px] sm:text-[10px] bg-amber-50 text-amber-800 font-bold px-2 py-0.5 rounded-full border border-amber-300 whitespace-nowrap flex-shrink-0">
               하교 피크 (15:25~17:30)
             </span>
           </div>
@@ -222,21 +222,21 @@
               <div class="grid grid-cols-3 gap-1.5">
                 <button onclick="sendCrowdReport('smooth')"
                   class="py-2 px-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 active:scale-95 border border-emerald-300 text-emerald-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
-                  <span class="flex items-center"><span
+                  <span class="flex items-center whitespace-nowrap"><span
                       class="w-2 h-2 rounded-full bg-emerald-500 inline-block mr-1"></span>여유</span>
-                  <span class="text-[9px] font-medium text-emerald-600 mt-0.5">&lt;15명 대기</span>
+                  <span class="text-[8.5px] sm:text-[9.5px] font-medium text-emerald-600 mt-0.5 whitespace-nowrap">&lt;15명 대기</span>
                 </button>
                 <button onclick="sendCrowdReport('moderate')"
                   class="py-2 px-1 rounded-lg bg-amber-50 hover:bg-amber-100 active:scale-95 border border-amber-300 text-amber-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
-                  <span class="flex items-center"><span
+                  <span class="flex items-center whitespace-nowrap"><span
                       class="w-2 h-2 rounded-full bg-amber-500 inline-block mr-1"></span>보통</span>
-                  <span class="text-[9px] font-medium text-amber-600 mt-0.5">15~25명 내외</span>
+                  <span class="text-[8.5px] sm:text-[9.5px] font-medium text-amber-600 mt-0.5 whitespace-nowrap">15~25명 내외</span>
                 </button>
                 <button onclick="sendCrowdReport('crowded')"
                   class="py-2 px-1 rounded-lg bg-rose-50 hover:bg-rose-100 active:scale-95 border border-rose-300 text-rose-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
-                  <span class="flex items-center"><span
+                  <span class="flex items-center whitespace-nowrap"><span
                       class="w-2 h-2 rounded-full bg-rose-500 inline-block mr-1"></span>포화</span>
-                  <span class="text-[9px] font-medium text-rose-600 mt-0.5">줄 길게 늘어섬</span>
+                  <span class="text-[8.5px] sm:text-[9.5px] font-medium text-rose-600 mt-0.5 whitespace-nowrap">줄 길게 늘어섬</span>
                 </button>
               </div>
             </div>
@@ -315,6 +315,7 @@
     let selectedStationName = "사당역9번출구앞";
     let selectedDirection = "DOWN";
     let currentXaiRequestId = 0;
+    let currentBusRequestId = 0;
 
     // 익명 UUID 기반 클라이언트 ID 발급 (캠퍼스 공유 Wi-Fi 환경 개인별 쿨다운 분리)
     function getClientId() {
@@ -586,7 +587,7 @@
             <div class="w-8 h-8 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin mx-auto"></div>
             <div class="space-y-1">
               <h4 class="text-xs font-black text-gray-800">[탑승 정류장] ${selectedStationName} 실시간 XAI 분석 중...</h4>
-              <p class="text-[11px] text-gray-400">ST-GNN 공간 그래프 및 TFT 시계열 어텐션을 계산하고 있습니다.</p>
+              <p class="text-[11px] text-gray-400">실시간 승하차 흐름 및 도로 교통 지연 모델을 계산하고 있습니다.</p>
             </div>
           </div>
         `;
@@ -774,17 +775,17 @@
             `).join("");
 
             return `
-              <div class="p-4 rounded-2xl border ${cardBorder} shadow-sm space-y-3 bg-white">
+              <div class="p-3.5 sm:p-4 rounded-2xl border ${cardBorder} shadow-sm space-y-3 bg-white">
                 <div class="flex justify-between items-start">
-                  <div>
+                  <div class="min-w-0 flex-1 mr-2">
                     <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">${bus.order}</span>
                     <div class="flex items-center space-x-1.5 mt-0.5 flex-wrap gap-y-1">
-                      <span class="text-lg font-black text-gray-900">${bus.shortPlate}</span>
-                      <span class="text-xs text-gray-500 font-bold">(${bus.remainSeats}석 잔여)</span>
-                      ${bus.isDoubleDecker ? '<span class="text-[10px] bg-indigo-100 text-indigo-700 font-black px-2 py-0.5 rounded-full border border-indigo-200">2층 버스 (71석)</span>' : '<span class="text-[10px] bg-gray-100 text-gray-600 font-bold px-2 py-0.5 rounded-full border border-gray-200">1층 버스 (45석)</span>'}
+                      <span class="text-base sm:text-lg font-black text-gray-900 whitespace-nowrap">${bus.shortPlate}</span>
+                      <span class="text-xs text-gray-500 font-bold whitespace-nowrap">(${bus.remainSeats}석 잔여)</span>
+                      ${bus.isDoubleDecker ? '<span class="text-[9.5px] sm:text-[10px] bg-indigo-100 text-indigo-700 font-black px-1.5 sm:px-2 py-0.5 rounded-full border border-indigo-200 whitespace-nowrap">2층 버스 (71석)</span>' : '<span class="text-[9.5px] sm:text-[10px] bg-gray-100 text-gray-600 font-bold px-1.5 sm:px-2 py-0.5 rounded-full border border-gray-200 whitespace-nowrap">1층 버스 (45석)</span>'}
                     </div>
                   </div>
-                  <span class="text-[11px] font-black px-2.5 py-1 rounded-full shadow-sm flex items-center ${badgeBg}">
+                  <span class="text-[10px] sm:text-[11px] font-black px-2 sm:px-2.5 py-1 rounded-full shadow-sm flex items-center whitespace-nowrap flex-shrink-0 ml-1.5 ${badgeBg}">
                     ${dotBadge} ${badgeLabel}
                   </span>
                 </div>
@@ -806,11 +807,11 @@
                 ${!isResv && bus.predictedSeatRange ? `
                 <!-- AI 예상 착석 가능 좌석 뱃지 -->
                 <div class="px-3 py-2 ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'bg-gradient-to-r from-rose-50 to-amber-50 border-rose-300' : 'bg-gradient-to-r from-indigo-50 to-blue-50 border-indigo-200'} rounded-xl border flex items-center justify-between text-xs">
-                  <div class="flex items-center space-x-1.5">
-                    <span class="w-2 h-2 rounded-full ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'bg-rose-500 animate-ping' : 'bg-indigo-600 animate-pulse'}"></span>
-                    <span class="font-bold ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'text-rose-950' : 'text-indigo-900'} text-[11px]">AI 예상 착석 가능 좌석</span>
+                  <div class="flex items-center space-x-1.5 min-w-0 mr-1.5">
+                    <span class="w-2 h-2 rounded-full flex-shrink-0 ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'bg-rose-500 animate-ping' : 'bg-indigo-600 animate-pulse'}"></span>
+                    <span class="font-bold ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'text-rose-950' : 'text-indigo-900'} text-[10.5px] sm:text-[11px] truncate">AI 예상 착석 가능 좌석</span>
                   </div>
-                  <span class="font-black ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'text-rose-700' : 'text-indigo-700'} text-xs">${bus.predictedSeatRange}</span>
+                  <span class="font-black ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'text-rose-700' : 'text-indigo-700'} text-xs whitespace-nowrap flex-shrink-0">${bus.predictedSeatRange}</span>
                 </div>
                 ` : ''}
 
@@ -910,6 +911,7 @@
     }
 
     async function fetchBusData(autoScroll = false) {
+      const requestId = ++currentBusRequestId;
       const refreshBtn = document.getElementById("refreshBtn");
       const arrivalContainer = document.getElementById("arrivalCards");
       const timelineContainer = document.getElementById("routeTimeline");
@@ -920,6 +922,13 @@
       try {
         const res = await fetch(`/api/buses?station_id=${selectedStationId}`);
         const data = await res.json();
+
+        // 사용자가 다른 정류장을 빠르게 연타했을 때 이전 응답 무시 (Race condition 방지)
+        if (requestId !== currentBusRequestId) {
+          if (refreshBtn) refreshBtn.classList.remove("animate-spin");
+          return;
+        }
+
         refreshBtn.classList.remove("animate-spin");
 
         const now = new Date();
@@ -974,23 +983,40 @@
             const cardBg = isReserved ? "bg-rose-50 border-rose-300" : "bg-white border-gray-200";
 
             return `
-              <div class="p-3 rounded-xl border ${cardBg} shadow-sm flex justify-between items-center">
-                <div class="flex items-center space-x-2">
-                  <span class="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded">직행</span>
-                  <div>
-                    <div class="flex items-center space-x-1.5">
-                      <span class="text-sm font-black text-gray-900">7790</span>
-                      <span class="text-xs font-bold ${isReserved ? 'text-rose-600' : 'text-emerald-700'}">${bus.predictTimeMin}분 후</span>
-                      <span class="text-xs text-gray-400">(${bus.remainStations}개 전)</span>
+              <div class="p-2.5 sm:p-3 rounded-xl border ${cardBg} shadow-sm flex justify-between items-center">
+                <div class="flex items-center space-x-2 min-w-0 flex-1 mr-1.5">
+                  <span class="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded flex-shrink-0">직행</span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center space-x-1 sm:space-x-1.5 flex-wrap gap-y-0.5">
+                      <span class="text-sm font-black text-gray-900 whitespace-nowrap">7790</span>
+                      <span class="text-xs font-bold whitespace-nowrap ${isReserved ? 'text-rose-600' : 'text-emerald-700'}">${bus.predictTimeMin}분 후</span>
+                      <span class="text-xs text-gray-400 whitespace-nowrap">(${bus.remainStations}개 전)</span>
+                      ${(!isReserved && bus.predictedSeatRange) ? `
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] sm:text-[10px] font-bold border whitespace-nowrap ${
+                          (bus.probColor === 'rose' || bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석'))
+                            ? 'bg-rose-50 text-rose-700 border-rose-300'
+                            : (bus.probColor === 'amber'
+                              ? 'bg-amber-50 text-amber-700 border-amber-300'
+                              : 'bg-emerald-50 text-emerald-700 border-emerald-300')
+                        }">
+                          <span class="w-1.5 h-1.5 rounded-full mr-1 flex-shrink-0 ${
+                            (bus.probColor === 'rose' || bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석'))
+                              ? 'bg-rose-500'
+                              : (bus.probColor === 'amber'
+                                ? 'bg-amber-500'
+                                : 'bg-emerald-500')
+                          }"></span>예상 ${bus.predictedSeatRange}
+                        </span>
+                      ` : ''}
                     </div>
-                    <div class="text-[11px] text-gray-400 flex items-center space-x-1.5 mt-0.5">
-                      <span>${bus.shortPlate} · 잔여 ${bus.remainSeats}석</span>
-                      ${bus.isDoubleDecker ? '<span class="px-1.5 py-0.2 bg-indigo-100 text-indigo-700 font-black rounded text-[10px]">2층 버스 (71석)</span>' : '<span class="px-1.5 py-0.2 bg-gray-100 text-gray-600 font-bold rounded text-[10px]">1층 버스</span>'}
-                      ${is79Plate ? '<span class="px-1.5 py-0.2 bg-rose-100 text-rose-700 font-black rounded text-[10px]">전세면허(79)</span>' : ''}
+                    <div class="text-[10px] sm:text-[11px] text-gray-400 flex items-center space-x-1 sm:space-x-1.5 mt-0.5 flex-wrap gap-y-0.5">
+                      <span class="whitespace-nowrap">${bus.shortPlate} · 잔여 ${bus.remainSeats}석</span>
+                      ${bus.isDoubleDecker ? '<span class="px-1.5 py-0.2 bg-indigo-100 text-indigo-700 font-black rounded text-[9.5px] sm:text-[10px] whitespace-nowrap">2층 버스 (71석)</span>' : '<span class="px-1.5 py-0.2 bg-gray-100 text-gray-600 font-bold rounded text-[9.5px] sm:text-[10px] whitespace-nowrap">1층 버스</span>'}
+                      ${is79Plate ? '<span class="px-1.5 py-0.2 bg-rose-100 text-rose-700 font-black rounded text-[9.5px] sm:text-[10px] whitespace-nowrap">전세면허(79)</span>' : ''}
                     </div>
                   </div>
                 </div>
-                <span class="text-[11px] font-black px-2.5 py-1 rounded-full shadow-sm ${badgeBg}">
+                <span class="text-[10px] sm:text-[11px] font-black px-2 sm:px-2.5 py-1 rounded-full shadow-sm whitespace-nowrap flex-shrink-0 ml-1.5 ${badgeBg}">
                   ${badgeText}
                 </span>
               </div>
@@ -1038,11 +1064,11 @@
               const tagText = isResv ? "전세" : "일반";
 
               return `
-                <div class="flex items-center space-x-1.5 border ${badgeBorder} px-2 py-0.5 rounded-lg shadow-xs text-xs font-bold">
+                <div class="flex items-center space-x-1 sm:space-x-1.5 border ${badgeBorder} px-1.5 sm:px-2 py-0.5 rounded-lg shadow-xs text-[11px] sm:text-xs font-bold whitespace-nowrap flex-shrink-0">
                   <span class="text-gray-900 font-black">${v.shortPlate}</span>
-                  <span class="text-[11px] text-gray-500">${v.remainSeats}석</span>
+                  <span class="text-[10px] sm:text-[11px] text-gray-500">${v.remainSeats}석</span>
                   ${v.isDoubleDecker ? '<span class="text-[9px] bg-gray-200 text-gray-700 px-1 rounded font-black">2층</span>' : ''}
-                  <span class="text-[10px] font-black px-1.5 py-0.2 rounded-full ${tagBg}">${tagText}</span>
+                  <span class="text-[9.5px] sm:text-[10px] font-black px-1.5 py-0.2 rounded-full ${tagBg}">${tagText}</span>
                 </div>
               `;
             }).join("");
@@ -1087,6 +1113,10 @@
         }
 
       } catch (err) {
+        if (requestId !== currentBusRequestId) {
+          if (refreshBtn) refreshBtn.classList.remove("animate-spin");
+          return;
+        }
         console.error("데이터 로드 오류:", err);
         if (refreshBtn) refreshBtn.classList.remove("animate-spin");
         if (arrivalContainer) {
@@ -1303,11 +1333,11 @@
 
       // 2. 정류장 칩 활성화 스타일
       document.querySelectorAll(".tt-st-chip").forEach(el => {
-        el.className = "tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100";
+        el.className = "tt-st-chip py-1 px-0.5 sm:px-1 rounded-lg text-[10px] sm:text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 whitespace-nowrap truncate";
       });
       const activeChip = document.getElementById(`ttChip_${ttSelectedStationId}`);
       if (activeChip) {
-        activeChip.className = "tt-st-chip py-1 px-1 rounded-lg text-[11px] font-black transition bg-slate-900 text-white shadow-xs";
+        activeChip.className = "tt-st-chip py-1 px-0.5 sm:px-1 rounded-lg text-[10px] sm:text-[11px] font-black transition bg-slate-900 text-white shadow-xs whitespace-nowrap truncate";
       }
 
       // 3. 상단 헤더 라벨 및 배차 메타 배너
@@ -1324,9 +1354,9 @@
         const last = isWk ? stInfo.lastBus : (ttSelectedStationId === '119000302' ? '23:55' : '22:55');
         const headwayText = isWk ? "평일 10~15분 간격" : "주말 20~25분 간격";
         metaBanner.innerHTML = `
-          <div class="flex justify-between items-center text-[10.5px] w-full">
-            <span class="text-gray-500 font-bold">${stInfo.note}</span>
-            <span class="text-blue-700 font-black">${headwayText} (첫차 ${first} / 막차 ${last})</span>
+          <div class="flex justify-between items-center text-[9.5px] sm:text-[10.5px] w-full flex-wrap gap-1">
+            <span class="text-gray-500 font-bold whitespace-nowrap">${stInfo.note}</span>
+            <span class="text-blue-700 font-black whitespace-nowrap">${headwayText} (첫차 ${first} / 막차 ${last})</span>
           </div>
         `;
       }
@@ -1440,19 +1470,19 @@
           liveCard.innerHTML = `
             <div class="p-2.5 bg-gradient-to-r from-blue-50 to-indigo-50/80 rounded-xl border border-blue-200 shadow-2xs space-y-1">
               <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-1.5 min-w-0">
+                <div class="flex items-center space-x-1.5 min-w-0 mr-1.5">
                   <span class="w-2 h-2 rounded-full bg-blue-600 animate-ping flex-shrink-0"></span>
-                  <span class="text-[11px] font-black text-blue-900 truncate">
+                  <span class="text-[10.5px] sm:text-[11px] font-black text-blue-900 truncate">
                     실시간 운행: <strong>${String(expH).padStart(2, '0')}:${String(expM).padStart(2, '0')}</strong> 도착 예상 (${nextBus.predictTimeMin}분 후)
                   </span>
                   ${deckBadge}
                 </div>
-                <span class="text-[11px] font-black text-blue-700 flex-shrink-0 ml-1">잔여 ${nextBus.remainSeats}석</span>
+                <span class="text-[10.5px] sm:text-[11px] font-black text-blue-700 whitespace-nowrap flex-shrink-0">잔여 ${nextBus.remainSeats}석</span>
               </div>
               ${delayNotice ? `
-                <div class="flex items-center justify-between pt-0.5 text-[10px] text-gray-500 pl-3.5">
-                  <span class="truncate">계획: ${String(matchedFirst.planH).padStart(2, '0')}:${String(matchedFirst.planM).padStart(2, '0')} 정시 인가 차량</span>
-                  ${delayNotice}
+                <div class="flex items-center justify-between pt-0.5 text-[9.5px] sm:text-[10px] text-gray-500 pl-3.5">
+                  <span class="truncate mr-1">계획: ${String(matchedFirst.planH).padStart(2, '0')}:${String(matchedFirst.planM).padStart(2, '0')} 정시 인가 차량</span>
+                  <span class="whitespace-nowrap flex-shrink-0">${delayNotice}</span>
                 </div>
               ` : ''}
             </div>
@@ -1478,10 +1508,10 @@
 
           if (liveMatch) {
             return `
-              <span class="text-xs font-black bg-blue-600 text-white px-2 py-0.5 rounded-full shadow-xs inline-flex items-center space-x-1 animate-pulse" title="계획: ${String(m).padStart(2, '0')}분 ➔ 실시간 예상: ${String(liveMatch.expM).padStart(2, '0')}분 (${liveMatch.liveBus.predictTimeMin}분후)">
+              <span class="text-[11px] sm:text-xs font-black bg-blue-600 text-white px-2 py-0.5 rounded-full shadow-xs inline-flex items-center space-x-1 animate-pulse whitespace-nowrap" title="계획: ${String(m).padStart(2, '0')}분 ➔ 실시간 예상: ${String(liveMatch.expM).padStart(2, '0')}분 (${liveMatch.liveBus.predictTimeMin}분후)">
                 <span>●</span>
                 <span>${String(m).padStart(2, '0')}</span>
-                <span class="text-[9.5px] text-amber-200 font-black">➔ ${String(liveMatch.expM).padStart(2, '0')}분<span class="text-[8.5px] opacity-90 font-normal">(${liveMatch.liveBus.predictTimeMin}분후)</span></span>
+                <span class="text-[9px] sm:text-[9.5px] text-amber-200 font-black">➔ ${String(liveMatch.expM).padStart(2, '0')}분<span class="text-[8px] sm:text-[8.5px] opacity-90 font-normal">(${liveMatch.liveBus.predictTimeMin}분후)</span></span>
               </span>
             `;
           }
@@ -1548,23 +1578,23 @@
         </div>
         <div class="grid grid-cols-5 gap-1 text-center bg-gray-50 p-1 rounded-xl border border-gray-200">
           <button onclick="selectTtStation('233003021')" id="ttChip_233003021"
-            class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-black transition bg-slate-900 text-white shadow-xs">
+            class="tt-st-chip py-1 px-0.5 sm:px-1 rounded-lg text-[10px] sm:text-[11px] font-black transition bg-slate-900 text-white shadow-xs whitespace-nowrap truncate">
             수원대
           </button>
           <button onclick="selectTtStation('233002255')" id="ttChip_233002255"
-            class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+            class="tt-st-chip py-1 px-0.5 sm:px-1 rounded-lg text-[10px] sm:text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 whitespace-nowrap truncate">
             신명
           </button>
           <button onclick="selectTtStation('233002371')" id="ttChip_233002371"
-            class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+            class="tt-st-chip py-1 px-0.5 sm:px-1 rounded-lg text-[10px] sm:text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 whitespace-nowrap truncate">
             아이파크
           </button>
           <button onclick="selectTtStation('233002245')" id="ttChip_233002245"
-            class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+            class="tt-st-chip py-1 px-0.5 sm:px-1 rounded-lg text-[10px] sm:text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 whitespace-nowrap truncate">
             효행초
           </button>
           <button onclick="selectTtStation('119000302')" id="ttChip_119000302"
-            class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+            class="tt-st-chip py-1 px-0.5 sm:px-1 rounded-lg text-[10px] sm:text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 whitespace-nowrap truncate">
             사당역 9출
           </button>
         </div>

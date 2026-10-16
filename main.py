@@ -2,6 +2,8 @@ import os
 import datetime
 import time
 import json
+import threading
+from typing import Literal
 import requests
 import urllib3
 from urllib.parse import quote
@@ -11,6 +13,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+
+# 스레드 안전한 디스크 파일 I/O 락
+FILE_IO_LOCK = threading.Lock()
 
 # GBIS 등 공공 SSL 인증서 자체서명 경고 콘솔 노이즈 억제
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -298,7 +303,25 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
     cached = CACHE_BUS_ARRIVALS.get(station_id)
     if cached and (now - cached["timestamp"] < BUS_CACHE_TTL):
         res = dict(cached["data"])
-        res["crowdData"] = get_crowd_summary(station_id=station_id)
+        crowd_now = get_crowd_summary(station_id=station_id)
+        res["crowdData"] = crowd_now
+        if station_id in STATION_XAI_PROFILES and res.get("arrivingBuses"):
+            try:
+                exps, _ = calculate_bus_predictions(station_id, res["arrivingBuses"], res.get("vehicles", []), crowd_now)
+                exp_map = {e["shortPlate"]: e for e in exps}
+                updated_arr = []
+                for b in res["arrivingBuses"]:
+                    b_copy = dict(b)
+                    short = b_copy.get("shortPlate")
+                    if short in exp_map:
+                        b_copy["predictedSeatRange"] = exp_map[short].get("predictedSeatRange")
+                        b_copy["boardingStatus"] = exp_map[short].get("boardingStatus")
+                        b_copy["boardingProbability"] = exp_map[short].get("boardingProb")
+                        b_copy["probColor"] = exp_map[short].get("probColor")
+                    updated_arr.append(b_copy)
+                res["arrivingBuses"] = updated_arr
+            except Exception:
+                pass
         return res
 
     if not CACHED_STATIONS:
@@ -468,12 +491,29 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
         except Exception as e_fb:
             print(f"GBIS 실시간 3대 추적/폴백 산출 오류: {e_fb}")
 
+    crowd_summary_data = get_crowd_summary(station_id=station_id)
+
+    # ⭐ 5대 주요 정류장(사당역9출, 수원대, 신명, 아이파크, 효행초)인 경우 XAI 예상 착석 좌석수 및 탑승 진단 즉시 부착
+    if station_id in STATION_XAI_PROFILES and arriving_buses:
+        try:
+            exps, _ = calculate_bus_predictions(station_id, arriving_buses, live_vehicles, crowd_summary_data)
+            exp_map = {e["shortPlate"]: e for e in exps}
+            for ab in arriving_buses:
+                short = ab.get("shortPlate")
+                if short in exp_map:
+                    ab["predictedSeatRange"] = exp_map[short].get("predictedSeatRange")
+                    ab["boardingStatus"] = exp_map[short].get("boardingStatus")
+                    ab["boardingProbability"] = exp_map[short].get("boardingProb")
+                    ab["probColor"] = exp_map[short].get("probColor")
+        except Exception as e_xai_attach:
+            print(f"XAI 예측 도착 버스 부착 오류: {e_xai_attach}")
+
     res_data = {
         "success": True,
         "stations": CACHED_STATIONS,
         "arrivingBuses": arriving_buses,
         "vehicles": live_vehicles,
-        "crowdData": get_crowd_summary(station_id=station_id)
+        "crowdData": crowd_summary_data
     }
     CACHE_BUS_ARRIVALS[station_id] = {"data": res_data, "timestamp": now}
     return res_data
@@ -497,39 +537,42 @@ def save_crowd_data_to_disk():
             dur = record.get("duration", 600) if isinstance(record, dict) else 600
             if now - t < dur:
                 clean_ips[ip] = record
-        with open(CROWD_DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump({"reports": clean_reports, "ips": clean_ips}, f)
+        with FILE_IO_LOCK:
+            with open(CROWD_DATA_FILE, "w", encoding="utf-8") as f:
+                json.dump({"reports": clean_reports, "ips": clean_ips}, f)
     except Exception as e:
         print(f"제보 데이터 디스크 저장 오류: {e}")
 
 def load_crowd_data_from_disk():
     global CROWD_REPORTS_BY_STATION, CROWD_REPORT_IP_COOLDOWN
     try:
-        if os.path.exists(CROWD_DATA_FILE):
+        with FILE_IO_LOCK:
+            if not os.path.exists(CROWD_DATA_FILE):
+                return
             with open(CROWD_DATA_FILE, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
-            now = time.time()
-            clean_reports = {}
-            for st_id, r_list in data.get("reports", {}).items():
-                valid = [r for r in r_list if now - r["time"] < 600]
-                if valid:
-                    clean_reports[st_id] = valid
-            CROWD_REPORTS_BY_STATION = clean_reports
-            clean_ips = {}
-            for ip, record in data.get("ips", {}).items():
-                t = record.get("time", 0) if isinstance(record, dict) else record
-                dur = record.get("duration", 600) if isinstance(record, dict) else 600
-                if now - t < dur:
-                    clean_ips[ip] = record
-            CROWD_REPORT_IP_COOLDOWN = clean_ips
-            print(f"[OK] 제보 데이터 {sum(len(v) for v in clean_reports.values())}건 디스크 복원 완료!")
+        now = time.time()
+        clean_reports = {}
+        for st_id, r_list in data.get("reports", {}).items():
+            valid = [r for r in r_list if now - r["time"] < 600]
+            if valid:
+                clean_reports[st_id] = valid
+        CROWD_REPORTS_BY_STATION = clean_reports
+        clean_ips = {}
+        for ip, record in data.get("ips", {}).items():
+            t = record.get("time", 0) if isinstance(record, dict) else record
+            dur = record.get("duration", 600) if isinstance(record, dict) else 600
+            if now - t < dur:
+                clean_ips[ip] = record
+        CROWD_REPORT_IP_COOLDOWN = clean_ips
+        print(f"[OK] 제보 데이터 {sum(len(v) for v in clean_reports.values())}건 디스크 복원 완료!")
     except Exception as e:
         print(f"제보 데이터 디스크 복원 오류: {e}")
 
 @app.post("/api/crowd-report")
 def report_crowd(
     request: Request,
-    status: str = Query(..., description="여유(smooth), 보통(moderate), 포화(crowded)"),
+    status: Literal["smooth", "moderate", "crowded"] = Query(..., description="여유(smooth), 보통(moderate), 포화(crowded)"),
     station_id: str = Query("119000302", description="제보 정류장 ID")
 ):
     """정류장별 학우들의 1초 원터치 줄 상태 제보 저장 API (도착 버스 연동 동적 쿨다운 최대 10분, 디스크 영구보존)"""
@@ -848,9 +891,15 @@ def estimate_sadang_waiters_by_time():
     elif 13.5 <= time_float < 16.5:  # 13:30 ~ 16:30 (낮 한산 시간대)
         base = 6
         desc = "낮 시간대 통학 한산"
-    elif 16.5 <= time_float < 19.5:  # 16:30 ~ 19:30 (퇴근길 봉담/수원대 귀가)
-        base = 35
-        desc = "퇴근길 봉담 방면 승차 집중 (퇴근 시민·비사용자 포함)"
+    elif 16.5 <= time_float < 17.5:  # 16:30 ~ 17:30 (퇴근길 유입 시작)
+        base = 40
+        desc = f"{day_name}요일 퇴근 유입 시작 (퇴근 시민·비사용자 포함)"
+    elif 17.5 <= time_float < 19.0:  # 17:30 ~ 19:00 (퇴근길 최대 극피크)
+        base = 52
+        desc = f"{day_name}요일 퇴근길 최대 극피크 (퇴근 시민·비사용자 집중)"
+    elif 19.0 <= time_float < 19.5:  # 19:00 ~ 19:30 (퇴근길 잔여 피크)
+        base = 40
+        desc = f"{day_name}요일 퇴근길 분산 (퇴근 시민·비사용자 포함)"
     elif 19.5 <= time_float < 22.0:  # 19:30 ~ 22:00 (야간 귀가)
         base = 12
         desc = "야간 귀가 시간대 (일반 승객 포함)"
@@ -1020,29 +1069,15 @@ UPSTREAM_STATION_CHAIN = [
     {"id": "233003021", "name": "수원대입구", "seq": 16}
 ]
 
-# ⭐ 3. 정류장별 XAI 탑승 및 실시간 도로교통 지연 분석 엔드포인트 (ST-GNN + TFT + Conformal Prediction)
-@app.get("/api/xai-analysis")
-def get_xai_analysis(station_id: str = Query("119000302")):
-    global CACHE_XAI_ANALYSIS
-    now = time.time()
-    cached = CACHE_XAI_ANALYSIS.get(station_id)
-    if cached and (now - cached["timestamp"] < XAI_CACHE_TTL):
-        res = dict(cached["data"])
-        res["crowdData"] = get_crowd_summary(station_id=station_id)
-        return res
-
-    bus_data = get_bus_arrivals(station_id=station_id)
-    arriving = bus_data.get("arrivingBuses", [])
-    vehicles = bus_data.get("vehicles", [])
-    crowd_info = get_crowd_summary(station_id=station_id)
-
+def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, crowd_info: dict) -> tuple[list, bool]:
+    """
+    정류장별 실시간 도착 버스의 XAI 좌석수 및 착석 확률을 도메인 휴리스틱 및 신뢰구간 불감대(Deadband) 모델로 산출합니다.
+    (/api/buses 및 /api/xai-analysis 양쪽에서 단일 엔진으로 공유)
+    """
     profile = STATION_XAI_PROFILES.get(station_id, STATION_XAI_PROFILES["119000302"])
     is_down = (profile["dir"] == "DOWN")
     is_morning_rush = crowd_info.get("isMorningRush", False)
     is_afternoon_rush = crowd_info.get("isAfternoonRush", False)
-
-    # 실시간 GBIS 도로교통 소통 속도 및 기상 지연 요인 산출
-    realtime_delays = calc_realtime_traffic_delays(direction=profile["dir"])
 
     # 상행(사당행) 효행초등학교(233002245) 선행 제보 및 실시간 잔여석 급감 사전 검사
     is_hyohaeng_surge = False
@@ -1052,15 +1087,22 @@ def get_xai_analysis(station_id: str = Query("119000302")):
         if h_st in ["crowded", "moderate"]:
             is_hyohaeng_surge = True
         else:
-            # ⭐ 학우 피드백 반영: 제보가 없더라도 효행초 통과 버스의 잔여석이 45석 -> 35석 이하(또는 2층 58석 이하)로
-            # 이미 크게 소진되었다면, 뒤따르는 아이파크/수원대에 엄청난 대기열이 집중되어 있다는 실측 시그널!
+            # ⭐ 학우 피드백 반영: 제보가 없더라도 효행초(seq <= 11) 구간을 통과한 직후 버스의 잔여석이
+            # 45석 -> 35석 이하(또는 2층 58석 이하)로 이미 크게 소진되었다면,
+            # 뒤따르는 아이파크/수원대에 엄청난 대기열이 집중되어 있다는 실측 시그널!
+            st_seq_map = {str(s["id"]): s.get("seq", 999) for s in CACHED_STATIONS if s.get("dir") == "UP"}
             for v in vehicles:
                 if v.get("dir") == "U":
-                    rem = v.get("remainSeats", 45)
-                    is_dd = v.get("isDoubleDecker", False)
-                    if (not is_dd and 0 < rem <= 35) or (is_dd and 0 < rem <= 58):
-                        is_hyohaeng_surge = True
-                        break
+                    curr_st = str(v.get("currentStationId", ""))
+                    v_seq = st_seq_map.get(curr_st, 999)
+                    # 효행초 정류장 부근(기점 ~ 효행초 직후 seq <= 11)에 있는 차량만 검사!
+                    # (이미 수원대를 지나 과천/사당 다 와가는 버스는 잔여석이 당연히 적으므로 제외)
+                    if v_seq <= 11:
+                        rem = v.get("remainSeats", 45)
+                        is_dd = v.get("isDoubleDecker", False)
+                        if (not is_dd and 0 < rem <= 35) or (is_dd and 0 < rem <= 58):
+                            is_hyohaeng_surge = True
+                            break
 
     bus_explanations = []
     target_list = arriving[:3] if is_down else arriving[:2]
@@ -1103,7 +1145,7 @@ def get_xai_analysis(station_id: str = Query("119000302")):
         else:
             crowd_status = crowd_info.get("status", "none")
 
-            # --- [개선] ST-GNN 상행 연쇄 전파 & 효행초 조기 포화(역주행 탑승) 연쇄 증폭 모델 ---
+            # --- [개선] 상행 연쇄 전파 & 효행초 조기 포화(역주행 탑승) 연쇄 증폭 모델 ---
             # 💡 사용자 피드백 반영:
             # 1. 효행초 조기 포화 감지 시(역주행 탑승): 뒤따르는 아이파크/신명/수원대 좌석 차감 가중치 대폭 증폭
             # 2. 안내 문구에서는 복잡한 차감 계산식/수치를 비노출하고 직관적인 상태 설명형 자연어 제공
@@ -1214,7 +1256,7 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                         est_waiters = 16
                         crowd_desc = f"학우 실시간 제보(여유) + 비사용자 대기열: 약 {est_waiters}명 차감 반영"
                     elif is_evening_rush:
-                        est_waiters = 13
+                        est_waiters = 18
                         crowd_desc = f"학우 실시간 제보(여유) + 퇴근 시민 대기열: 약 {est_waiters}명 차감 반영"
                     else:
                         est_waiters = 7
@@ -1223,8 +1265,9 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                     tft_crowd_weight = 40
                     is_from_report = True
                 elif crowd_status == "moderate":
-                    base_mod = 25 if is_morning_rush else (22 if is_evening_rush else 18)
-                    est_waiters = max(12, int(round(base_mod * decay_fac)))
+                    base_mod = 25 if is_morning_rush else (32 if is_evening_rush else 18)
+                    min_mod = 12 if not is_evening_rush else 16
+                    est_waiters = max(min_mod, int(round(base_mod * decay_fac)))
                     delta = 4
                     tft_crowd_weight = 45
                     crowd_desc = (f"학우 실시간 제보(보통) + 비사용자 대기열: 약 {est_waiters}명 차감 반영"
@@ -1232,8 +1275,9 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                                   f"직전 제보 잔류 + 비사용자 대기열: 약 {est_waiters}명 차감 반영")
                     is_from_report = True
                 elif crowd_status == "crowded":
-                    base_crowd = 52 if is_morning_rush else (40 if is_evening_rush else 30)
-                    est_waiters = max(24, int(round(base_crowd * decay_fac)))
+                    base_crowd = 52 if is_morning_rush else (54 if is_evening_rush else 30)
+                    min_crowd = 24 if not is_evening_rush else 30
+                    est_waiters = max(min_crowd, int(round(base_crowd * decay_fac)))
                     delta = 5
                     tft_crowd_weight = 50
                     crowd_desc = (f"학우 실시간 제보(포화) + 비사용자 대기열: 약 {est_waiters}명 대폭 차감 반영"
@@ -1261,7 +1305,7 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                     p_curr = b.get("predictTimeMin") or (prev_bus.get("predictTimeMin", 10) + 15)
                     p_prev = prev_bus.get("predictTimeMin") or 10
                     interval_min = max(5, p_curr - p_prev)
-                    arrival_rate = 1.0 if is_morning_rush else (0.7 if is_evening_rush else 0.4)
+                    arrival_rate = 1.0 if is_morning_rush else (0.9 if is_evening_rush else 0.4)
                     est_waiters = leftover_waiters + int(round(interval_min * arrival_rate))
                     crowd_desc = f"앞선 버스({prev_bus.get('shortPlate', '')}) 승차 이월 및 대기열: 약 {est_waiters}명 차감 반영"
 
@@ -1544,6 +1588,37 @@ def get_xai_analysis(station_id: str = Query("119000302")):
             "predictedSeatRange": seat_range,
             "features": features
         })
+
+    return bus_explanations, is_hyohaeng_surge
+
+
+# ⭐ 3. 정류장별 XAI 탑승 및 실시간 도로교통 지연 분석 엔드포인트 (도메인 휴리스틱 + 신뢰구간 불감대 모델)
+@app.get("/api/xai-analysis")
+def get_xai_analysis(station_id: str = Query("119000302")):
+    global CACHE_XAI_ANALYSIS
+    now = time.time()
+    cached = CACHE_XAI_ANALYSIS.get(station_id)
+    if cached and (now - cached["timestamp"] < XAI_CACHE_TTL):
+        res = dict(cached["data"])
+        res["crowdData"] = get_crowd_summary(station_id=station_id)
+        return res
+
+    bus_data = get_bus_arrivals(station_id=station_id)
+    arriving = bus_data.get("arrivingBuses", [])
+    vehicles = bus_data.get("vehicles", [])
+    crowd_info = get_crowd_summary(station_id=station_id)
+
+    profile = STATION_XAI_PROFILES.get(station_id, STATION_XAI_PROFILES["119000302"])
+    is_down = (profile["dir"] == "DOWN")
+
+    realtime_delays = calc_realtime_traffic_delays(direction=profile["dir"])
+
+    bus_explanations, is_hyohaeng_surge = calculate_bus_predictions(
+        station_id=station_id,
+        arriving=arriving,
+        vehicles=vehicles,
+        crowd_info=crowd_info
+    )
 
     model_meta = {
         "modelName": "7790 스마트 통학 지원 AI",
