@@ -14,6 +14,8 @@ UPSTREAM_CSV_PATH = os.path.join(DATA_DIR, "upstream_telemetry.csv")
 # 사당역 9번 출구(119000302) 출발 직후 통과하는 연속 체크포인트 정류소 ID
 # (남현동 경유 -> 과천진입 경유 -> 과천동행정복지센터 -> 대공원고가교 경유)
 # 폴링 주기 사이 버스가 빠르게 통과하더라도 100% 포착하며, 45분 쿨다운으로 동일 회차 중복 기록을 원천 방지합니다.
+# (남현동 경유 -> 과천진입 경유 -> 과천동행정복지센터 -> 대공원고가교 경유)
+# 폴링 주기 사이 버스가 빠르게 통과하더라도 100% 포착하며, 45분 쿨다운으로 동일 회차 중복 기록을 원천 방지합니다.
 SADANG_POST_DEPARTURE_STATION_IDS = {
     "277102049": "남현동(경유)",
     "277102291": "과천진입(경유)",
@@ -21,12 +23,23 @@ SADANG_POST_DEPARTURE_STATION_IDS = {
     "277103204": "대공원고가교(경유)",
 }
 
-# 상행 4대 핵심 정류장 ID 매핑
-UPSTREAM_TARGET_STATION_IDS = {
-    "233002245": "효행초등학교정문",
-    "233002371": "아이파크정문",
-    "233002255": "신명아파트",
-    "233003021": "수원대입구",
+# 각 체크포인트 통과 시점 대비 사당역 실제 출발 시각 오프셋(초) 보정 테이블
+# (원거리 체크포인트에서 최초 감지되더라도 사당역 출발 시각과 배차간격을 100% 실측 기준으로 복원)
+SADANG_CHECKPOINT_OFFSETS_SEC = {
+    "277102049": 60.0,   # 남현동 (~1분)
+    "277102291": 130.0,  # 과천진입 (~2.2분)
+    "220000009": 210.0,  # 과천동행정복지센터 (~3.5분)
+    "277103204": 300.0,  # 대공원고가교 (~5.0분)
+}
+
+# 상행 4대 핵심 정류장의 승차(카드 태그)가 100% 완료된 후 직후 정류장에 진입할 때의 매핑
+# GBIS fromStationId는 정류장 진입 순간(승차 전)에 갱신되므로, 직후 정류장 진입 시점에 측정해야
+# 해당 정류장에서 탑승한 승객이 잔여석(remainSeats)에 완전히 반영됩니다.
+UPSTREAM_POST_STATION_MAP = {
+    "233002371": ("233002245", "효행초등학교정문"),  # 아이파크 진입 시 -> 효행초 승차 완료 확정
+    "233002255": ("233002371", "아이파크정문"),      # 신명아파트 진입 시 -> 아이파크 승차 완료 확정
+    "233003021": ("233002255", "신명아파트"),        # 수원대입구 진입 시 -> 신명아파트 승차 완료 확정
+    "233000945": ("233003021", "수원대입구"),        # 와우지구 진입 시 -> 수원대입구 승차 완료 확정
 }
 
 import json
@@ -64,14 +77,17 @@ def _load_dedup_cache():
 
 
 def _save_dedup_cache():
+    """원자적(Atomic) 파일 쓰기로 디스크 쿨다운 캐시 저장"""
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
-        with open(DEDUP_CACHE_PATH, "w", encoding="utf-8") as f:
+        tmp = DEDUP_CACHE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump({
                 "sadang": _logged_sadang_trips,
                 "upstream": _logged_upstream_trips,
                 "last_sadang_departure_time": _last_sadang_departure_time
             }, f)
+        os.replace(tmp, DEDUP_CACHE_PATH)
     except Exception:
         pass
 
@@ -151,17 +167,25 @@ def process_live_vehicles_for_learning(
             # =========================================================================
             # [A] 사당역 9번 출구 출발 직후 체크포인트 포착 -> 실제 탑승 인원 역산 및 온라인 학습
             # =========================================================================
+            # =========================================================================
+            # [A] 사당역 9번 출구 출발 직후 체크포인트 포착 -> 실제 탑승 인원 역산 및 온라인 학습
+            # =========================================================================
             if st_id in SADANG_POST_DEPARTURE_IDS_SET and plate not in _logged_sadang_trips:
                 actual_boarded = max(0, total_seats - remain_seats)
 
-                # 직전 사당역 출발 버스와의 배차 간격(Headway) 산출
+                # ⭐ 체크포인트 정류소별 사당역 실제 출발 시각 오프셋 역산
+                # (대공원고가교 등 원거리에서 최초 감지되어도 실제 사당역 출발 시각을 정확히 복원)
+                offset_sec = SADANG_CHECKPOINT_OFFSETS_SEC.get(st_id, 90.0)
+                effective_dep_epoch = now_epoch - offset_sec
+
+                # 직전 사당역 출발 버스와의 실제 배차 간격(Headway) 산출
                 if _last_sadang_departure_time > 0:
-                    gap_min = (now_epoch - _last_sadang_departure_time) / 60.0
+                    gap_min = (effective_dep_epoch - _last_sadang_departure_time) / 60.0
                     headway_gap_min = max(4.0, min(35.0, gap_min))
                 else:
                     headway_gap_min = 12.0
 
-                _last_sadang_departure_time = now_epoch
+                _last_sadang_departure_time = effective_dep_epoch
                 _logged_sadang_trips[plate] = now_epoch
                 dirty_dedup = True
 
@@ -218,22 +242,23 @@ def process_live_vehicles_for_learning(
 
             # =========================================================================
             # [B] 상행 4개 정류장(효행초·아이파크·신명·수원대) 통과 버스 누적 소진 좌석 온라인 학습
+            # (GBIS 특성상 직후 정류장에 진입했을 때 이전 정류장 승객 카드 태그가 100% 완료된 잔여석 반영)
             # =========================================================================
-            elif st_id in UPSTREAM_TARGET_STATION_IDS:
-                dedup_key = f"{st_id}_{plate}"
+            elif st_id in UPSTREAM_POST_STATION_MAP:
+                target_st_id, target_st_name = UPSTREAM_POST_STATION_MAP[st_id]
+                dedup_key = f"{target_st_id}_{plate}"
                 if dedup_key not in _logged_upstream_trips:
                     _logged_upstream_trips[dedup_key] = now_epoch
                     dirty_dedup = True
                     consumed_seats = max(0, total_seats - remain_seats)
-                    st_name = UPSTREAM_TARGET_STATION_IDS[st_id]
 
                     try:
                         with open(UPSTREAM_CSV_PATH, "a", newline="", encoding="utf-8-sig") as f:
                             writer = csv.writer(f)
                             writer.writerow([
                                 now_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                                st_id,
-                                st_name,
+                                target_st_id,
+                                target_st_name,
                                 now_dt.weekday(),
                                 now_dt.hour,
                                 now_dt.minute,
@@ -248,7 +273,7 @@ def process_live_vehicles_for_learning(
 
                     try:
                         online_learner.learn_from_upstream_bus(
-                            station_id=st_id,
+                            station_id=target_st_id,
                             now_dt=now_dt,
                             plate=plate,
                             consumed_seats=consumed_seats,

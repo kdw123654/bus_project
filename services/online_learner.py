@@ -341,14 +341,17 @@ class SadangOnlineLearner:
 
         blended = (1.0 - effective_alpha) * float(heuristic_base) + effective_alpha * ml_combined
 
-        # 4. 실시간 직전 버스 모멘텀 보정 (최근 35분 이내 출발 버스의 실측 오차 지수 감쇄 반영)
+        # 4. 실시간 직전 버스 모멘텀 보정
+        # 버킷 통계가 충분히 학습되었을 때(effective_alpha 증가 시) 초기 사전 규칙 대비 오차가 이중 가산(Overshooting)되지 않도록
+        # (1.0 - effective_alpha) 잔여 가중치를 곱하여 수학적 무결성을 보장합니다.
         momentum_shift = 0.0
         recent_bus_note = ""
         if self.last_departure_epoch > 0:
             elapsed_min = (now_epoch - self.last_departure_epoch) / 60.0
             if 0 <= elapsed_min <= 35.0:
                 decay = math.exp(-elapsed_min / 20.0)
-                momentum_shift = max(-10.0, min(14.0, self.ewma_residual * 0.45 * decay))
+                residual_damping = max(0.15, 1.0 - effective_alpha)
+                momentum_shift = max(-10.0, min(14.0, self.ewma_residual * 0.45 * decay * residual_damping))
                 if self.last_bus_event:
                     last_p = self.last_bus_event.get("plate", "")
                     last_b = self.last_bus_event.get("actualBoarded", 0)
@@ -445,7 +448,7 @@ class SadangOnlineLearner:
         }
 
     def save_state(self):
-        """학습된 가중치와 시간대별 버킷 통계를 디스크에 영구 저장"""
+        """학습된 가중치와 시간대별 버킷 통계를 원자적(Atomic)으로 디스크에 영구 저장 (데이터 깨짐 방지)"""
         try:
             state = {
                 "bucket_stats": self.bucket_stats,
@@ -462,8 +465,10 @@ class SadangOnlineLearner:
                 "last_updated_str": self.last_updated_str,
                 "last_bus_event": self.last_bus_event
             }
-            with open(MODEL_STATE_FILE, "w", encoding="utf-8") as f:
+            tmp_file = MODEL_STATE_FILE + ".tmp"
+            with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_file, MODEL_STATE_FILE)
         except Exception as e:
             print(f"[WARN] 온라인 학습 모델 저장 오류: {e}")
 

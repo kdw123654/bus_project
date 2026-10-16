@@ -875,39 +875,6 @@
               ${delayBarsHTML}
             </div>
           </div>
-
-          <!-- 3. 실시간 분석 및 전요일·전시간대 온라인 자동학습 정보 -->
-          <div class="p-4 bg-slate-900 text-white rounded-2xl shadow-sm space-y-2.5">
-            <div class="flex justify-between items-center">
-              <div class="flex items-center space-x-1.5 text-indigo-400 font-bold text-xs">
-                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
-                <span>7790 실시간 통학 지원 AI · 온라인 자동학습</span>
-              </div>
-              <span class="text-[9.5px] sm:text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold whitespace-nowrap flex-shrink-0">● 전요일·전시간대 학습 중</span>
-            </div>
-            ${data.onlineLearning ? `
-            <div class="p-2.5 bg-slate-800/80 rounded-xl border border-slate-700/70 space-y-1.5 text-[10.5px]">
-              <div class="flex justify-between items-center text-gray-300">
-                <span class="font-bold text-indigo-300">사당·상류 통과 버스 실측 역산 학습</span>
-                <span class="font-bold text-emerald-400 whitespace-nowrap">누적 ${(data.onlineLearning.sadangTotalLearnedBuses || 0) + (data.onlineLearning.upstreamTotalLearnedBuses || 0)}대 학습 (ML 반영률 ${data.onlineLearning.mlWeightPct || 15}%)</span>
-              </div>
-              ${data.onlineLearning.lastSadangRecord ? `
-              <div class="text-[10px] text-gray-400 flex items-center justify-between pt-1 border-t border-slate-700/60">
-                <span>최근 사당 통과 버스 실측 (${data.onlineLearning.lastSadangRecord.plate})</span>
-                <span class="text-amber-300 font-bold whitespace-nowrap">실제 ${data.onlineLearning.lastSadangRecord.boarded}명 탑승 · 잔여 ${data.onlineLearning.lastSadangRecord.remain}석</span>
-              </div>
-              ` : `
-              <div class="text-[10px] text-gray-400 pt-0.5">
-                버스가 정류장을 통과할 때마다 잔여석 변화량(45석-잔여석)을 역산해 요일·시간대별 가중치를 자동 갱신합니다.
-              </div>
-              `}
-            </div>
-            ` : ''}
-            <div class="pt-1.5 border-t border-slate-800 flex justify-between items-center text-[10px] text-gray-400">
-              <span>데이터: 경기도 버스 실시간 GPS · 학생 대기열 제보</span>
-              <span class="text-indigo-400 font-bold whitespace-nowrap">운행 중 ${data.modelMeta.totalActiveBuses}대 분석</span>
-            </div>
-          </div>
         `;
         if (refreshIcon) refreshIcon.classList.remove("animate-spin");
         const xaiUpdateTime = document.getElementById("xaiUpdateTime");

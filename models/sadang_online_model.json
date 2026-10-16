@@ -7,7 +7,36 @@
       "last_actual": 17
     }
   },
-  "upstream_bucket_stats": {},
+  "upstream_bucket_stats": {
+    "233002245_4_41": {
+      "count": 1,
+      "ewma_consumed": 1.0,
+      "last_remain": 70,
+      "last_plate": "4547",
+      "updated_at": "20:48"
+    },
+    "233002371_4_41": {
+      "count": 1,
+      "ewma_consumed": 1.0,
+      "last_remain": 70,
+      "last_plate": "4547",
+      "updated_at": "20:49"
+    },
+    "233002255_4_41": {
+      "count": 1,
+      "ewma_consumed": 2.0,
+      "last_remain": 69,
+      "last_plate": "4547",
+      "updated_at": "20:50"
+    },
+    "233003021_4_41": {
+      "count": 1,
+      "ewma_consumed": 5.0,
+      "last_remain": 66,
+      "last_plate": "4547",
+      "updated_at": "20:51"
+    }
+  },
   "weights": [
     0.0,
     0.0,
@@ -38,7 +67,7 @@
   "ewma_residual": 7.05,
   "last_departure_epoch": 1792150852.3791773,
   "total_learned_buses": 2,
-  "total_upstream_learned": 0,
+  "total_upstream_learned": 4,
   "cumulative_abs_error": 14.0,
   "within_3_count": 1,
   "eval_count": 2,

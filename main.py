@@ -1380,13 +1380,25 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
 
                         upstream_consumed += c_seats
 
-                # ⭐ 상행 정류장 실시간 온라인 학습 데이터 융합
+                # ⭐ 상행 정류장 실시간 온라인 학습 데이터 융합 (이중 차감 방지 스케일링)
+                # online_learner는 기점부터 해당 정류장까지의 총 누적 소진 좌석(full_chain)을 학습하므로,
+                # 버스가 이미 중간 정류장을 지나 실시간 잔여석(seats)에 선행 승차가 이미 반영된 경우,
+                # 남은 잔여 구간 비율(remaining_ratio)만큼만 스케일링하여 이중 차감을 원천 차단합니다.
                 if upstream_consumed > 0:
-                    upstream_consumed, _ = online_learner.get_upstream_learned_consumption(
+                    full_chain_default = sum(
+                        (15 if node["id"] == "233002371" else (6 if node["id"] == "233002245" else 6))
+                        for node in UPSTREAM_STATION_CHAIN if node["seq"] < current_seq
+                    )
+                    learned_full, _ = online_learner.get_upstream_learned_consumption(
                         station_id=station_id,
                         now_dt=get_kst_now(),
-                        default_consumed=upstream_consumed
+                        default_consumed=max(upstream_consumed, full_chain_default)
                     )
+                    if full_chain_default > 0:
+                        scale_ratio = min(1.0, upstream_consumed / float(full_chain_default))
+                        upstream_consumed = max(1, int(round(learned_full * scale_ratio)))
+                    else:
+                        upstream_consumed = min(upstream_consumed, learned_full)
 
             # 앞 정류장 선소진을 차감한 실질 잔여 좌석
             effective_seats = max(0, seats - upstream_consumed) if not is_down else seats
