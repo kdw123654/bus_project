@@ -1,0 +1,3 @@
+﻿timestamp,weekday,is_friday_night,hour,minute,plate,is_double_decker,total_seats,remain_seats,actual_boarded,headway_gap_min,heuristic_prior,crowd_status,checkpoint_station
+2026-10-16 20:33:24,4,0,20,33,4550,1,71,45,26,12.0,14,none,대공원고가교(경유)
+2026-10-16 20:40:52,4,0,20,40,4543,1,71,54,17,7.5,14,none,남현동(경유)

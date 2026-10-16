@@ -1,0 +1,56 @@
+{
+  "bucket_stats": {
+    "4_41": {
+      "count": 2,
+      "mean": 21.5,
+      "ewma": 22.85,
+      "last_actual": 17
+    }
+  },
+  "upstream_bucket_stats": {},
+  "weights": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    2e-06,
+    0.001829,
+    0.045966,
+    0.062411,
+    0.001145,
+    3e-06,
+    -0.168236,
+    0.133992,
+    0.0,
+    0.0,
+    0.0,
+    0.215088,
+    0.0,
+    0.0,
+    0.0,
+    -0.013272,
+    0.215088
+  ],
+  "bias": 0.107558,
+  "ewma_residual": 7.05,
+  "last_departure_epoch": 1792150852.3791773,
+  "total_learned_buses": 2,
+  "total_upstream_learned": 0,
+  "cumulative_abs_error": 14.0,
+  "within_3_count": 1,
+  "eval_count": 2,
+  "last_updated_str": "2026-10-16 20:40:52",
+  "last_bus_event": {
+    "plate": "4543",
+    "actualBoarded": 17,
+    "remainSeats": 54,
+    "isDoubleDecker": true,
+    "headwayGapMin": 7.5,
+    "timeStr": "20:40",
+    "weekday": 4,
+    "timestamp": 1792150852.3791773
+  }
+}

@@ -13,6 +13,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from services.online_learner import online_learner, is_friday_night_window
+from services.telemetry_logger import process_live_vehicles_for_learning
 
 # 스레드 안전한 디스크 파일 I/O 락
 FILE_IO_LOCK = threading.Lock()
@@ -34,12 +36,19 @@ STATION_ID = "119000302"         # 사당역 9번 출구 앞 (승차)
 ROUTE_REGULAR_ID = "200000149"    # 일반 7790
 ROUTE_RESERVE_ID = "233000384"    # 7790 (예약/전세)
 
+_bg_learning_started = False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI 최신 권장 lifespan 컨텍스트 매니저 (startup / shutdown)"""
-    global CACHED_STATIONS
+    global CACHED_STATIONS, _bg_learning_started
     CACHED_STATIONS = fetch_full_route_stations()
     load_crowd_data_from_disk()
+    if not _bg_learning_started:
+        _bg_learning_started = True
+        t = threading.Thread(target=_background_telemetry_learning_loop, daemon=True)
+        t.start()
+        print("[OK] 전 요일·전 시간대 실시간 버스 온라인 학습(Online-ML) 백그라운드 데몬 가동 시작!")
     yield
 
 app = FastAPI(title="7790 & Smart Transit Router", lifespan=lifespan)
@@ -493,6 +502,23 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
 
     crowd_summary_data = get_crowd_summary(station_id=station_id)
 
+    # ⭐ [실시간 온라인 머신러닝 학습]: 사당역 출발 직후 체크포인트 및 상행 4개 정류장 통과 버스의 실제 탑승 인원 즉시 학습
+    if live_vehicles:
+        try:
+            sadang_c_status = (
+                crowd_summary_data.get("status", "none")
+                if str(station_id) == "119000302"
+                else get_crowd_summary(station_id="119000302").get("status", "none")
+            )
+            process_live_vehicles_for_learning(
+                live_vehicles=live_vehicles,
+                now_dt=get_kst_now(),
+                heuristic_prior_fn=lambda: estimate_sadang_waiters_by_time(apply_online_ml=False),
+                crowd_status=sadang_c_status
+            )
+        except Exception as e_learn:
+            print(f"실시간 차량 온라인 학습 트리거 오류: {e_learn}")
+
     # ⭐ 5대 주요 정류장(사당역9출, 수원대, 신명, 아이파크, 효행초)인 경우 XAI 예상 착석 좌석수 및 탑승 진단 즉시 부착
     if station_id in STATION_XAI_PROFILES and arriving_buses:
         try:
@@ -517,6 +543,55 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
     }
     CACHE_BUS_ARRIVALS[station_id] = {"data": res_data, "timestamp": now}
     return res_data
+
+
+def _background_telemetry_learning_loop():
+    """
+    [24시간 전 요일·전 시간대 자율 학습 백그라운드 데몬]
+    사용자가 앱을 열어두지 않은 시간대에도 25초 주기로 GBIS 실시간 차량 위치를 감시하여,
+    버스가 사당역 및 주요 정류장을 통과할 때마다 실제 탑승 인원을 역산하고 모델을 실시간 학습시킵니다.
+    """
+    time.sleep(5)
+    while True:
+        try:
+            now_dt = get_kst_now()
+            # 7790 운행 시간대 (04:50 ~ 익일 01:30) 전 시간대 감시
+            if now_dt.hour >= 5 or now_dt.hour < 2:
+                live_data = fetch_gbis_route_cached()
+                v_list = live_data.get("result", {}).get("realTime", {}).get("list", [])
+                if v_list:
+                    parsed_vehicles = []
+                    for v in v_list:
+                        plate_list = v.get("busNo", [])
+                        plate = plate_list[0] if plate_list else ""
+                        short_plate = plate[-4:] if len(plate) >= 4 else plate
+                        is_resv, _ = is_charter_or_reserved_bus(
+                            route_id=ROUTE_REGULAR_ID,
+                            route_name="7790",
+                            plate_no=plate,
+                            short_plate=short_plate,
+                            reservation_flag=v.get("reservation", "")
+                        )
+                        target_st = str(v.get("fromStationId") or v.get("toStationId") or "")
+                        parsed_vehicles.append({
+                            "plateNo": plate,
+                            "shortPlate": short_plate,
+                            "remainSeats": int(v.get("seat") or 0),
+                            "isReserved": is_resv,
+                            "isDoubleDecker": (v.get("lowPlate") == "2"),
+                            "currentStationId": target_st,
+                            "dir": v.get("busDirList", [""])[0]
+                        })
+                    sadang_c = get_crowd_summary(station_id="119000302").get("status", "none")
+                    process_live_vehicles_for_learning(
+                        live_vehicles=parsed_vehicles,
+                        now_dt=now_dt,
+                        heuristic_prior_fn=lambda: estimate_sadang_waiters_by_time(apply_online_ml=False),
+                        crowd_status=sadang_c
+                    )
+        except Exception as e_bg:
+            print(f"[WARN] 백그라운드 온라인 학습 루프 오류: {e_bg}")
+        time.sleep(25)
 
 # ⭐ 정류장별 학우 실시간 제보 영구 보존 및 IP 도배 방지 쿨다운
 CROWD_DATA_FILE = "crowd_reports_cache.json"
@@ -739,7 +814,10 @@ def get_crowd_summary(station_id="119000302"):
             is_down = (str(station_id) == "119000302")
 
     # ⭐ 방향별 피크 시간대 판별:
-    # 1) 사당역 9번 출구 (하행 DOWN, 수원대행): 평일 아침 등교 피크 (07:30 ~ 10:10)
+    # 1) 사당역 9번 출구 (하행 DOWN, 수원대행):
+    #    - 평일 아침 등교 피크 (07:30 ~ 10:10)
+    #    - 평일 오후 퇴근 피크 (16:30 ~ 19:30)
+    #    - 금요일 불금 심야 피크 (금 21:30 ~ 토 00:40 막차까지)
     # 2) 수원대입구/신명/아이파크/효행초 (상행 UP, 사당역행): 평일 오후 하교 피크 (15:25 ~ 17:30)
     now_dt = get_kst_now()
     time_float = now_dt.hour + now_dt.minute / 60.0
@@ -748,11 +826,14 @@ def get_crowd_summary(station_id="119000302"):
     if is_down:
         is_morning_peak = (weekday < 5) and (7.5 <= time_float <= (10.0 + 10.0/60.0))
         is_evening_peak = (weekday < 5) and (16.5 <= time_float <= 19.5)
-        is_peak = is_morning_peak or is_evening_peak
+        is_friday_night = is_friday_night_window(weekday, time_float)
+        is_peak = is_morning_peak or is_evening_peak or is_friday_night
         if is_morning_peak:
             peak_name = "등교 피크 (07:30~10:10)"
         elif is_evening_peak:
             peak_name = "퇴근 피크 (16:30~19:30)"
+        elif is_friday_night:
+            peak_name = "🔥 불금 심야 피크 (21:30~00:30)"
         else:
             peak_name = ""
     else:
@@ -760,6 +841,7 @@ def get_crowd_summary(station_id="119000302"):
         peak_name = "하교 피크 (15:25~17:30)"
         is_morning_peak = False
         is_evening_peak = False
+        is_friday_night = False
 
     if valid_reports:
         cnt_smooth = sum(1 for r in valid_reports if r["status"] == "smooth")
@@ -816,6 +898,7 @@ def get_crowd_summary(station_id="119000302"):
             "peakName": peak_name,
             "isMorningRush": (is_peak and is_down and is_morning_peak),
             "isEveningRush": (is_peak and is_down and is_evening_peak),
+            "isFridayNight": (is_peak and is_down and is_friday_night),
             "isAfternoonRush": (is_peak and not is_down),
             "isSticky": is_sticky,
             "stickyDecayFactor": sticky_decay_factor
@@ -840,33 +923,70 @@ def get_crowd_summary(station_id="119000302"):
             "peakName": peak_name,
             "isMorningRush": (is_peak and is_down and is_morning_peak),
             "isEveningRush": (is_peak and is_down and is_evening_peak),
+            "isFridayNight": (is_peak and is_down and is_friday_night),
             "isAfternoonRush": (is_peak and not is_down),
             "isSticky": False,
             "stickyDecayFactor": 1.0
         }
 
 # ⭐ 사당역 9번 출구(하행 수원대행) 학우 제보 부재 시 자동 작동하는
-# 수원대학교 강의 시간표 및 요일별 통학 데이터 기반 사전 통계 모델 (Bayesian Prior)
-def estimate_sadang_waiters_by_time():
+# 수원대학교 강의 시간표, 불금 심야 귀가 패턴 및 실시간 온라인 머신러닝 융합 모델
+def estimate_sadang_waiters_by_time(apply_online_ml: bool = True, is_double_decker: bool = False):
     now_dt = get_kst_now()
     hour = now_dt.hour
     minute = now_dt.minute
     weekday = now_dt.weekday()  # 0:월, 1:화, ..., 4:금, 5:토, 6:일
-
-    # 주말 (토/일)
-    if weekday >= 5:
-        if 11 <= hour <= 19:
-            return 9, "주말 일반 통행 분산 (일반 승객 포함)"
-        else:
-            return 3, "주말 한산 시간대"
-
-    # 평일 요일 가중치 (월/화 등교 집중 1.05배, 목요일 원활 0.90배, 금공강 0.70배, 수요일 1.0배)
-    day_multiplier = 1.05 if weekday in [0, 1] else (0.70 if weekday == 4 else (0.90 if weekday == 3 else 1.0))
-    day_name = ["월", "화", "수", "목", "금"][weekday]
-
     time_float = hour + minute / 60.0
 
-    # 💡 사용자 피드백 반영: 대기열 차감 인원을 기존 대비 2/3(약 67%) 수준으로 하향 조정
+    # 🔥 0. 금요일 밤이 자정을 넘어 토요일 새벽(00:00 ~ 00:40)이 된 경우: 불금 00:30 막차 대란 연속 처리
+    if weekday == 5 and time_float <= 0.67:
+        base = 55
+        est = int(round(base * 1.15))  # 약 63명 (1층 만석 초과, 2층 경합)
+        desc = "불금 사당역 00:30 막차 대란 (초과 만석 위험·서울 모임 마감 및 지하철 환승 집중)"
+        if apply_online_ml:
+            est, desc, _ = online_learner.predict_sadang_waiters(now_dt, est, desc, is_double_decker=is_double_decker)
+        return est, desc
+
+    # 평일 자정 직후(화~금 00:00 ~ 00:38): 전날 밤 사당역 00:30 막차 귀가 시간대
+    if weekday in [1, 2, 3, 4] and time_float <= 0.65:
+        est = 25
+        desc = "사당역 00:30 심야 막차 귀가 시간대 (비사용자 집중)"
+        if apply_online_ml:
+            est, desc, _ = online_learner.predict_sadang_waiters(now_dt, est, desc, is_double_decker=is_double_decker)
+        return est, desc
+
+    # 1. 주말 (토/일 일반 시간대)
+    if weekday >= 5:
+        if 11 <= hour <= 19:
+            est, desc = 9, "주말 일반 통행 분산 (일반 승객 포함)"
+        elif 21 <= hour <= 23:
+            est, desc = 16, "주말 야간 귀가 시간대 (서울 나들이 귀가객 포함)"
+        else:
+            est, desc = 4, "주말 한산 시간대"
+        if apply_online_ml:
+            est, desc, _ = online_learner.predict_sadang_waiters(now_dt, est, desc, is_double_decker=is_double_decker)
+        return est, desc
+
+    # 2. 평일 요일×시간대 정밀 가중치 분리:
+    # - 금요일 오전(07:30~12:00): '금공강' 효과로 등교 인원 감축 (0.70배)
+    # - 금요일 오후/퇴근(12:00~21:30): 조기 퇴근 및 약속 이동 반영 (1.0배)
+    # - 🔥 금요일 불금 심야(21:30~24:00): 서울(강남/홍대/사당) 모임 후 귀가객 폭증 (1.15배 가중)
+    if weekday == 4:
+        if time_float >= 21.5:
+            day_multiplier = 1.15
+        elif time_float < 12.0:
+            day_multiplier = 0.70
+        else:
+            day_multiplier = 1.0
+    elif weekday in [0, 1]:
+        day_multiplier = 1.05
+    elif weekday == 3:
+        day_multiplier = 0.90
+    else:
+        day_multiplier = 1.0
+
+    day_name = ["월", "화", "수", "목", "금"][weekday]
+
     if 7.5 <= time_float < (7 + 50/60.0):  # 07:30 ~ 07:50 (1교시 등교열 급증 구간)
         base = 39
         desc = f"{day_name}요일 1교시 등교 급증 (비사용자·일반 승객 포함)"
@@ -874,10 +994,10 @@ def estimate_sadang_waiters_by_time():
         base = 51
         desc = f"{day_name}요일 1교시 등교 극피크 (비사용자·일반 승객 포함)"
     elif (8 + 35/60.0) <= time_float < (8 + 55/60.0):  # 08:35 ~ 08:55 (1교시 직전 막바지 등교 & 2교시 유입)
-        base = 35  # 사용자 요청 반영: 3명 추가 감축 (기존 38명 -> 35명)
+        base = 35
         desc = f"{day_name}요일 1교시 막바지·2교시 유입 (비사용자·일반 승객 포함)"
     elif (8 + 55/60.0) <= time_float < (9 + 35/60.0):  # 08:55 ~ 09:35 (10:30 2교시 등교 피크)
-        base = 31  # 사용자 요청 반영: 3명 추가 감축 (기존 34명 -> 31명)
+        base = 31
         desc = f"{day_name}요일 10:30 2교시 등교 피크 (비사용자·일반 승객 포함)"
     elif (9 + 35/60.0) <= time_float < (10 + 10/60.0):  # 09:35 ~ 10:10 (2교시 승차 마무리 및 완화)
         base = 25
@@ -900,14 +1020,37 @@ def estimate_sadang_waiters_by_time():
     elif 19.0 <= time_float < 19.5:  # 19:00 ~ 19:30 (퇴근길 잔여 피크)
         base = 40
         desc = f"{day_name}요일 퇴근길 분산 (퇴근 시민·비사용자 포함)"
-    elif 19.5 <= time_float < 22.0:  # 19:30 ~ 22:00 (야간 귀가)
-        base = 12
+    elif 19.5 <= time_float < 21.5:  # 19:30 ~ 21:30 (야간 귀가)
+        base = 14
         desc = "야간 귀가 시간대 (일반 승객 포함)"
+    elif 21.5 <= time_float < 22.5:  # 21:30 ~ 22:30 (불금 1차 귀가 급증 vs 평일 야간)
+        if weekday == 4:
+            base = 38
+            desc = "🔥 불금 야간 1차 귀가 급증 (서울 모임·회식 귀가객 집중)"
+        else:
+            base = 12
+            desc = "평일 야간 귀가 시간대 (일반 승객 포함)"
+    elif 22.5 <= time_float < 23.75:  # 22:30 ~ 23:45 (불금 심야 귀가 극피크 vs 평일 심야)
+        if weekday == 4:
+            base = 48
+            desc = "🔥 불금 심야 귀가 극피크 (서울 모임 종료·대기열 장사진)"
+        else:
+            base = 15
+            desc = "평일 심야 귀가 시간대 (일반 승객 포함)"
+    elif 23.75 <= time_float <= 24.0:  # 23:45 ~ 24:00 (막차 직전 대란)
+        if weekday == 4:
+            base = 55
+            desc = "🔥 불금 사당역 00:30 막차 대란 (초과 만석 위험·지하철 환승 집중)"
+        else:
+            base = 25
+            desc = "사당역 00:30 막차 귀가 시간대 (비사용자 집중)"
     else:  # 심야/새벽
         base = 4
         desc = "심야/새벽 한산 시간대"
 
     est = int(round(base * day_multiplier))
+    if apply_online_ml:
+        est, desc, _ = online_learner.predict_sadang_waiters(now_dt, est, desc, is_double_decker=is_double_decker)
     return est, desc
 
 # ⭐ 실시간 GBIS 도로교통 소통시간 및 실시간 기상/노면 데이터 연동 함수
@@ -1237,6 +1380,14 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
 
                         upstream_consumed += c_seats
 
+                # ⭐ 상행 정류장 실시간 온라인 학습 데이터 융합
+                if upstream_consumed > 0:
+                    upstream_consumed, _ = online_learner.get_upstream_learned_consumption(
+                        station_id=station_id,
+                        now_dt=get_kst_now(),
+                        default_consumed=upstream_consumed
+                    )
+
             # 앞 정류장 선소진을 차감한 실질 잔여 좌석
             effective_seats = max(0, seats - upstream_consumed) if not is_down else seats
 
@@ -1249,10 +1400,14 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                 is_sticky = crowd_info.get("isSticky", False)
                 decay_fac = crowd_info.get("stickyDecayFactor", 1.0)
                 is_evening_rush = crowd_info.get("isEveningRush", False)
+                is_friday_night = crowd_info.get("isFridayNight", False)
 
                 if crowd_status == "smooth":
                     # 피크 시간대에는 제보자가 '여유'를 눌러도 비사용자 및 일반 시민 기본 대기열이 존재
-                    if is_morning_rush:
+                    if is_friday_night:
+                        est_waiters = 22
+                        crowd_desc = f"학우 실시간 제보(여유) + 불금 심야 서울 모임 귀가객 대기열: 약 {est_waiters}명 차감 반영"
+                    elif is_morning_rush:
                         est_waiters = 16
                         crowd_desc = f"학우 실시간 제보(여유) + 비사용자 대기열: 약 {est_waiters}명 차감 반영"
                     elif is_evening_rush:
@@ -1265,28 +1420,31 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                     tft_crowd_weight = 40
                     is_from_report = True
                 elif crowd_status == "moderate":
-                    base_mod = 25 if is_morning_rush else (32 if is_evening_rush else 18)
-                    min_mod = 12 if not is_evening_rush else 16
+                    base_mod = 42 if is_friday_night else (25 if is_morning_rush else (32 if is_evening_rush else 18))
+                    min_mod = 22 if is_friday_night else (16 if is_evening_rush else 12)
                     est_waiters = max(min_mod, int(round(base_mod * decay_fac)))
                     delta = 4
                     tft_crowd_weight = 45
-                    crowd_desc = (f"학우 실시간 제보(보통) + 비사용자 대기열: 약 {est_waiters}명 차감 반영"
+                    crowd_desc = (f"학우 실시간 제보(보통) + {'불금 심야 귀가객' if is_friday_night else '비사용자'} 대기열: 약 {est_waiters}명 차감 반영"
                                   if not is_sticky else
-                                  f"직전 제보 잔류 + 비사용자 대기열: 약 {est_waiters}명 차감 반영")
+                                  f"직전 제보 잔류 + {'불금 심야' if is_friday_night else '비사용자'} 대기열: 약 {est_waiters}명 차감 반영")
                     is_from_report = True
                 elif crowd_status == "crowded":
-                    base_crowd = 52 if is_morning_rush else (54 if is_evening_rush else 30)
-                    min_crowd = 24 if not is_evening_rush else 30
+                    base_crowd = 60 if is_friday_night else (52 if is_morning_rush else (54 if is_evening_rush else 30))
+                    min_crowd = 34 if is_friday_night else (30 if is_evening_rush else 24)
                     est_waiters = max(min_crowd, int(round(base_crowd * decay_fac)))
                     delta = 5
                     tft_crowd_weight = 50
-                    crowd_desc = (f"학우 실시간 제보(포화) + 비사용자 대기열: 약 {est_waiters}명 대폭 차감 반영"
+                    crowd_desc = (f"학우 실시간 제보(포화) + {'불금 심야 막차 대란' if is_friday_night else '비사용자 대기열'}: 약 {est_waiters}명 대폭 차감 반영"
                                   if not is_sticky else
-                                  f"직전 혼잡 제보 잔류 + 비사용자 대기열: 약 {est_waiters}명 대폭 차감 반영")
+                                  f"직전 혼잡 제보 잔류 + {'불금 심야' if is_friday_night else '비사용자'} 대기열: 약 {est_waiters}명 대폭 차감 반영")
                     is_from_report = True
                 else:
-                    # ⭐ 실시간 제보 부재 시: 수원대 통학 시간표 및 비사용자 포함 사전 통계 모델 자동 가동 (2/3 수준)
-                    est_waiters, time_slot_desc = estimate_sadang_waiters_by_time()
+                    # ⭐ 실시간 제보 부재 시: 수원대 통학 시간표·불금 심야 모델 및 실시간 온라인 머신러닝 모델 가동
+                    est_waiters, time_slot_desc = estimate_sadang_waiters_by_time(
+                        apply_online_ml=True,
+                        is_double_decker=is_double
+                    )
                     delta = 4
                     tft_crowd_weight = 38
                     crowd_desc = f"대기열 분석: [{time_slot_desc}] 비사용자 포함 약 {est_waiters}명 사전 차감 반영"
@@ -1305,7 +1463,7 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                     p_curr = b.get("predictTimeMin") or (prev_bus.get("predictTimeMin", 10) + 15)
                     p_prev = prev_bus.get("predictTimeMin") or 10
                     interval_min = max(5, p_curr - p_prev)
-                    arrival_rate = 1.0 if is_morning_rush else (0.9 if is_evening_rush else 0.4)
+                    arrival_rate = 1.1 if is_friday_night else (1.0 if is_morning_rush else (0.9 if is_evening_rush else 0.4))
                     est_waiters = leftover_waiters + int(round(interval_min * arrival_rate))
                     crowd_desc = f"앞선 버스({prev_bus.get('shortPlate', '')}) 승차 이월 및 대기열: 약 {est_waiters}명 차감 반영"
 
@@ -1592,7 +1750,7 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
     return bus_explanations, is_hyohaeng_surge
 
 
-# ⭐ 3. 정류장별 XAI 탑승 및 실시간 도로교통 지연 분석 엔드포인트 (도메인 휴리스틱 + 신뢰구간 불감대 모델)
+# ⭐ 3. 정류장별 XAI 탑승 및 실시간 도로교통 지연 분석 엔드포인트 (도메인 휴리스틱 + 실시간 온라인 머신러닝 + 불감대 모델)
 @app.get("/api/xai-analysis")
 def get_xai_analysis(station_id: str = Query("119000302")):
     global CACHE_XAI_ANALYSIS
@@ -1601,6 +1759,7 @@ def get_xai_analysis(station_id: str = Query("119000302")):
     if cached and (now - cached["timestamp"] < XAI_CACHE_TTL):
         res = dict(cached["data"])
         res["crowdData"] = get_crowd_summary(station_id=station_id)
+        res["onlineLearning"] = online_learner.get_status_summary()
         return res
 
     bus_data = get_bus_arrivals(station_id=station_id)
@@ -1620,13 +1779,15 @@ def get_xai_analysis(station_id: str = Query("119000302")):
         crowd_info=crowd_info
     )
 
+    ml_summary = online_learner.get_status_summary()
     model_meta = {
         "modelName": "7790 스마트 통학 지원 AI",
-        "algorithm": "앞 정류장 승차 누적 예측 + 실시간 도로망 지연 분석",
-        "dataSources": ["경기도 버스 실시간 GPS", "기상청 실시간 기상/노면 데이터", f"{profile['name']} 학우 실시간 제보 & {'등교 통학 패턴' if is_down else '하교 통학 패턴'}"],
+        "algorithm": "전 요일·전 시간대 실시간 온라인 학습(Online-ML) + 불감대 좌석 예측",
+        "dataSources": ["경기도 버스 실시간 GPS", "기상청 실시간 기상/노면 데이터", f"{profile['name']} 학우 실시간 제보 & {'등교·퇴근·불금 심야 패턴' if is_down else '하교 통학 패턴'}"],
         "totalActiveBuses": len(vehicles),
         "confidenceLevel": "95% 착석 신뢰 보증",
-        "modelVersion": "v3.1-LiveTransit"
+        "modelVersion": "v3.2-OnlineML",
+        "onlineLearning": ml_summary
     }
 
     res_data = {
@@ -1636,10 +1797,20 @@ def get_xai_analysis(station_id: str = Query("119000302")):
         "delayFactors": realtime_delays,
         "modelMeta": model_meta,
         "crowdData": crowd_info,
+        "onlineLearning": ml_summary,
         "isHyohaengSurge": is_hyohaeng_surge if not is_down else False
     }
     CACHE_XAI_ANALYSIS[station_id] = {"data": res_data, "timestamp": now}
     return res_data
+
+
+@app.get("/api/ml-status")
+def get_ml_status():
+    """전 요일·전 시간대 실시간 온라인 머신러닝 학습 현황 조회 API"""
+    return {
+        "success": True,
+        "onlineLearning": online_learner.get_status_summary()
+    }
 
 # ⭐ 4. 7790번 운행 시간표 및 MiRi 전세 예약버스 API
 @app.get("/api/timetable")
