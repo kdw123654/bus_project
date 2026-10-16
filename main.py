@@ -3,15 +3,20 @@ import datetime
 import time
 import json
 import requests
+import urllib3
 from urllib.parse import quote
-from fastapi import FastAPI, Query, Request
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+
+# GBIS 등 공공 SSL 인증서 자체서명 경고 콘솔 노이즈 억제
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 load_dotenv()
 API_KEY = os.getenv("BUS_API_KEY")
-ODSAY_API_KEY = os.getenv("ODSAY_API_KEY")
 
 # 대한민국 표준시(KST, UTC+9) 보증 헬퍼 (서버 타임존이 UTC인 클라우드/도커 환경에서도 항상 KST 기준 동작)
 KST = datetime.timezone(datetime.timedelta(hours=9))
@@ -24,11 +29,15 @@ STATION_ID = "119000302"         # 사당역 9번 출구 앞 (승차)
 ROUTE_REGULAR_ID = "200000149"    # 일반 7790
 ROUTE_RESERVE_ID = "233000384"    # 7790 (예약/전세)
 
-ODSAY_HEADERS = {'Referer': 'http://127.0.0.1:8000'}  # ODsay API 호출 시 Referer 헤더 필요
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI 최신 권장 lifespan 컨텍스트 매니저 (startup / shutdown)"""
+    global CACHED_STATIONS
+    CACHED_STATIONS = fetch_full_route_stations()
+    load_crowd_data_from_disk()
+    yield
 
-from fastapi.middleware.cors import CORSMiddleware
-
-app = FastAPI(title="7790 & Smart Transit Router")
+app = FastAPI(title="7790 & Smart Transit Router", lifespan=lifespan)
 
 # ⭐ 외부 도메인 및 모바일 WebView 배포 대비 CORS 전면 허용
 app.add_middleware(
@@ -51,16 +60,43 @@ CACHE_BUS_ARRIVALS = {}      # {station_id: {"data": dict, "timestamp": float}}
 CACHE_XAI_ANALYSIS = {}      # {station_id: {"data": dict, "timestamp": float}}
 CACHE_TRAFFIC_DELAYS = {}    # {direction: {"data": list, "timestamp": float}}
 CACHE_WEATHER = {"data": None, "timestamp": 0.0}
+CACHE_GBIS_ROUTE = {"data": None, "timestamp": 0.0}   # GBIS 노선/차량/소요시간 단일 통합 인메모리 캐시
+CROWD_REPORT_IP_RATE_LIMIT = {}  # {ip: [timestamps]} - 캠퍼스 Wi-Fi 분당 도배 방지
 
 BUS_CACHE_TTL = 6.0          # 6초 캐시: 동시 접속자가 100명이어도 외부 API는 6초에 1번만 호출
 XAI_CACHE_TTL = 5.0          # 5초 XAI 분석 캐시
 TRAFFIC_CACHE_TTL = 12.0     # 12초 캐시
 WEATHER_CACHE_TTL = 300.0    # 5분 캐시
+GBIS_ROUTE_CACHE_TTL = 8.0   # 8초 GBIS 실시간 데이터 공유 캐시 (도착/차량/소요시간 중복 요청 방어)
 
 # 💡 GBIS 및 공공기관 방화벽(WAF) 차단 방지를 위한 브라우저 User-Agent
 GBIS_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
+
+def fetch_gbis_route_cached(force_refresh=False):
+    """
+    GBIS searchRouteJson 엔드포인트를 8초 인메모리 캐싱하여
+    도착 버스 조회와 실시간 도로교통 지연 분석(SHAP) 간의 중복 네트워크 I/O를 원천 차단합니다.
+    """
+    global CACHE_GBIS_ROUTE
+    now = time.time()
+    if not force_refresh and CACHE_GBIS_ROUTE["data"] and (now - CACHE_GBIS_ROUTE["timestamp"] < GBIS_ROUTE_CACHE_TTL):
+        return CACHE_GBIS_ROUTE["data"]
+
+    url_route = "https://www.gbis.go.kr/gbis2014/schBusAPI.action"
+    data_route = {"cmd": "searchRouteJson", "routeId": ROUTE_REGULAR_ID}
+    try:
+        r_live = requests.post(url_route, data=data_route, headers=GBIS_HEADERS, timeout=5, verify=False)
+        if r_live.status_code == 200:
+            res = r_live.json()
+            CACHE_GBIS_ROUTE = {"data": res, "timestamp": now}
+            return res
+    except Exception as e:
+        print(f"GBIS 노선 통합 캐시 조회 오류: {e}")
+
+    return CACHE_GBIS_ROUTE["data"] or {}
+
 
 def get_real_client_ip(request: Request) -> str:
     """리버스 프록시(Nginx, Cloudflare, AWS, Render, ngrok 등) 환경에서 실제 클라이언트 IP 추출"""
@@ -73,13 +109,58 @@ def get_real_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def is_charter_or_reserved_bus(
+    route_id: str = "",
+    route_name: str = "",
+    plate_no: str = "",
+    short_plate: str = "",
+    reservation_flag: str = ""
+) -> tuple[bool, str]:
+    """
+    7790번 운행 차량이 일반 정규 광역버스(탑승 가능)인지,
+    외부 임차 전세/예약버스(경기 79사/바/아/자, 9000번대 등 일반 학생 탑승 불가)인지 정밀 식별합니다.
+
+    [면허 체계 기준]:
+    - 경진여객 정규 노선 면허: 경기 70사(수원시), 경기 76아(화성시)
+    - 외부 임차 전세버스 면허: 경기 79사, 경기 79바, 경기 79아, 경기 79자 (및 경기 78사/바/아/자 등 전세버스조합 면허)
+    - 예약버스 식별 번호: 차량 뒤 4자리가 9000번대(9XXX)로 임시 배정된 차량
+    - GBIS/공공데이터 플래그: ROUTE_RESERVE_ID('233000384'), '예약' 노선명, reservation == 'Y'
+    """
+    clean_plate = (plate_no or "").replace(" ", "")
+    clean_short = (short_plate or "").replace(" ", "")
+    if not clean_short and clean_plate:
+        clean_short = clean_plate[-4:] if len(clean_plate) >= 4 else clean_plate
+
+    # 1. 공공데이터/GBIS 공식 예약 노선 ID 또는 명칭에 '예약'이 명시된 경우
+    if str(route_id) == ROUTE_RESERVE_ID or ("예약" in str(route_name)):
+        return True, "GBIS 공공데이터 예약 노선(233000384)으로 지정됨"
+
+    # 2. GBIS 실시간 차량 reservation 플래그
+    if str(reservation_flag).upper() == "Y":
+        return True, "GBIS 실시간 차량 예약(Reservation) 플래그 식별됨"
+
+    # 3. ⭐ 경기도 전세버스 전용 면허 식별 (경기 79사, 경기 79바, 경기 79아, 경기 79자 등)
+    # 경진여객 정규 면허(경기 70사 수원 / 경기 76아 화성) 외의 전세버스 면허인 경우 100% 임차 전세차량
+    charter_plate_markers = ["경기79", "79사", "79바", "79아", "79자", "경기78", "78사", "78바", "78아", "78자"]
+    for marker in charter_plate_markers:
+        if marker in clean_plate:
+            return True, f"전세버스 면허('{marker}'): 외부 임차 전세 차량으로 식별됨 (정규 70사/76아 외 면허)"
+
+    # 서울 등 타 지자체 전세버스(서울 70사/바 등) 임차 차량 검사
+    if any(m in clean_plate for m in ["서울70사", "서울70바", "서울70아", "서울70자"]):
+        return True, f"외부 전세버스 면허('{clean_plate}'): 타 시도 임차 전세 차량"
+
+    # 4. 차량 번호 뒤 4자리가 9000번대인 경우 (출퇴근 전세버스 임시 식별 번호 대역)
+    if clean_short.startswith("9"):
+        return True, f"차량번호 '{clean_short}': 9000번대 외부 임차 전세버스 식별 번호"
+
+    return False, "정규 광역버스 면허 (경기 70사 수원 / 경기 76아 화성)"
+
+
 def fetch_full_route_stations():
     """GBIS에서 7790 전 노선 66개 정류장 수집"""
-    url = "https://www.gbis.go.kr/gbis2014/schBusAPI.action"
-    data = {"cmd": "searchRouteJson", "routeId": ROUTE_REGULAR_ID}
     try:
-        r = requests.post(url, data=data, headers=GBIS_HEADERS, timeout=10, verify=False)
-        res = r.json()
+        res = fetch_gbis_route_cached(force_refresh=True)
         up_list = res.get("result", {}).get("gg", {}).get("up", {}).get("list", [])
         down_list = res.get("result", {}).get("gg", {}).get("down", {}).get("list", [])
 
@@ -121,12 +202,6 @@ def fetch_full_route_stations():
         return []
 
 
-@app.on_event("startup")
-def startup_event():
-    global CACHED_STATIONS
-    CACHED_STATIONS = fetch_full_route_stations()
-    load_crowd_data_from_disk()
-
 
 @app.get("/")
 def get_home():
@@ -148,9 +223,7 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
     if not CACHED_STATIONS:
         CACHED_STATIONS = fetch_full_route_stations()
 
-    url_arrival = f"https://apis.data.go.kr/6410000/busarrivalservice/v2/getBusArrivalListv2?serviceKey={API_KEY}&stationId={station_id}&format=json"    
-    url_route = "https://www.gbis.go.kr/gbis2014/schBusAPI.action"
-    data_route = {"cmd": "searchRouteJson", "routeId": ROUTE_REGULAR_ID}
+    url_arrival = f"https://apis.data.go.kr/6410000/busarrivalservice/v2/getBusArrivalListv2?serviceKey={API_KEY}&stationId={station_id}&format=json"
 
     arriving_buses = []
     live_vehicles = []
@@ -168,11 +241,17 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
                     if bus.get("predictTime1"):
                         plate = bus.get("plateNo1", "")
                         short_plate = plate[-4:] if len(plate) >= 4 else plate
-                        # 예약 노선이거나, 명칭에 예약이 있거나, 9천번대 임차 전세버스인 경우
-                        is_resv = (route_id == ROUTE_RESERVE_ID) or ("예약" in route_name) or (short_plate.startswith("9"))
+                        # 예약 노선이거나, 명칭에 예약이 있거나, 경기 79사 등 전세면허/9000번대 임차 전세버스 판별
+                        is_resv, resv_reason = is_charter_or_reserved_bus(
+                            route_id=route_id,
+                            route_name=route_name,
+                            plate_no=plate,
+                            short_plate=short_plate
+                        )
                         arriving_buses.append({
                             "routeName": route_name,
                             "isReserved": is_resv,
+                            "reserveReason": resv_reason,
                             "predictTimeMin": int(bus.get("predictTime1")),
                             "remainStations": int(bus.get("locationNo1") or 0),
                             "remainSeats": int(bus.get("remainSeatCnt1") or 0),
@@ -182,10 +261,16 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
                     if bus.get("predictTime2"):
                         plate = bus.get("plateNo2", "")
                         short_plate = plate[-4:] if len(plate) >= 4 else plate
-                        is_resv = (route_id == ROUTE_RESERVE_ID) or ("예약" in route_name) or (short_plate.startswith("9"))
+                        is_resv, resv_reason = is_charter_or_reserved_bus(
+                            route_id=route_id,
+                            route_name=route_name,
+                            plate_no=plate,
+                            short_plate=short_plate
+                        )
                         arriving_buses.append({
                             "routeName": route_name,
                             "isReserved": is_resv,
+                            "reserveReason": resv_reason,
                             "predictTimeMin": int(bus.get("predictTime2")),
                             "remainStations": int(bus.get("locationNo2") or 0),
                             "remainSeats": int(bus.get("remainSeatCnt2") or 0),
@@ -196,30 +281,34 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
     except Exception as e:
         print(f"도착 API 오류: {e}")
 
-    # 2. 노선 전체 실시간 차량 위치
+    # 2. 노선 전체 실시간 차량 위치 (통합 캐시 활용)
     try:
-        r_live = requests.post(url_route, data=data_route, headers=GBIS_HEADERS, timeout=4, verify=False)
-        if r_live.status_code == 200:
-            live_data = r_live.json()
-            v_list = live_data.get("result", {}).get("realTime", {}).get("list", [])
-            for v in v_list:
-                plate_list = v.get("busNo", [])
-                plate = plate_list[0] if plate_list else ""
-                short_plate = plate[-4:] if len(plate) >= 4 else plate
-                # API reservation 플래그가 Y이거나, 9천번대 임차 전세차량인 경우
-                is_reserved = (v.get("reservation") == "Y") or (short_plate.startswith("9"))
-                # 카카오맵/GBIS 기준 실제 버스가 정차/출발한 현재 정류장(fromStationId)을 우선 매핑
-                target_station = str(v.get("fromStationId") or v.get("toStationId") or "")
-                
-                live_vehicles.append({
-                    "plateNo": plate,
-                    "shortPlate": short_plate,
-                    "remainSeats": int(v.get("seat") or 0),
-                    "isReserved": is_reserved,
-                    "isDoubleDecker": (v.get("lowPlate") == "2"),
-                    "currentStationId": target_station,
-                    "dir": v.get("busDirList", [""])[0]
-                })
+        live_data = fetch_gbis_route_cached()
+        v_list = live_data.get("result", {}).get("realTime", {}).get("list", [])
+        for v in v_list:
+            plate_list = v.get("busNo", [])
+            plate = plate_list[0] if plate_list else ""
+            short_plate = plate[-4:] if len(plate) >= 4 else plate
+            # 경기 79사 전세 면허, reservation 플래그, 9천번대 임차 전세 정밀 판별
+            is_reserved, resv_reason = is_charter_or_reserved_bus(
+                route_id=ROUTE_REGULAR_ID,
+                route_name="7790",
+                plate_no=plate,
+                short_plate=short_plate,
+                reservation_flag=v.get("reservation", "")
+            )
+            # 카카오맵/GBIS 기준 실제 버스가 정차/출발한 현재 정류장(fromStationId)을 우선 매핑
+            target_station = str(v.get("fromStationId") or v.get("toStationId") or "")
+            
+            live_vehicles.append({
+                "plateNo": plate,
+                "shortPlate": short_plate,
+                "remainSeats": int(v.get("seat") or 0),
+                "isReserved": is_reserved,
+                "isDoubleDecker": (v.get("lowPlate") == "2"),
+                "currentStationId": target_station,
+                "dir": v.get("busDirList", [""])[0]
+            })
     except Exception as e:
         print(f"차량 API 오류: {e}")
 
@@ -391,9 +480,24 @@ def report_crowd(
     else:
         dynamic_cooldown = max(120, min(target_eta_min * 60, 600))  # 최대 10분(600초)
 
-    # 2. IP 및 정류장 기반 개인별 도배 방지 쿨다운 검사 (정류장별 독립 쿨다운 보장)
+    # 2. 하이브리드 Rate Limit: 개인 UUID 식별 + 캠퍼스 Wi-Fi IP 분당 총량 제한
     client_ip = get_real_client_ip(request)
-    cooldown_key = f"{client_ip}_{station_id}"
+    client_uuid = request.headers.get("x-client-id", "").strip()
+    user_id = client_uuid if client_uuid else client_ip
+    cooldown_key = f"{user_id}_{station_id}"
+
+    # 2-1. 공인 IP 기준 분당 총량 제한 (스크립트/도배 방어, 캠퍼스 Wi-Fi 고려 분당 최대 8건)
+    ip_history = CROWD_REPORT_IP_RATE_LIMIT.get(client_ip, [])
+    ip_history = [t for t in ip_history if now - t < 60]
+    if len(ip_history) >= 8:
+        return {
+            "success": False,
+            "message": "교내 네트워크에서 일시적으로 제보가 집중되었습니다. 1분 후 다시 시도해 주세요.",
+            "remainCooldown": 30,
+            "stationId": station_id
+        }
+
+    # 2-2. 개인별(UUID/기기) 정류장 쿨다운 검사
     last_record = CROWD_REPORT_IP_COOLDOWN.get(cooldown_key)
     if isinstance(last_record, dict):
         last_time = last_record.get("time", 0)
@@ -417,6 +521,9 @@ def report_crowd(
             "stationId": station_id
         }
 
+    ip_history.append(now)
+    CROWD_REPORT_IP_RATE_LIMIT[client_ip] = ip_history
+
     if station_id not in CROWD_REPORTS_BY_STATION:
         CROWD_REPORTS_BY_STATION[station_id] = []
 
@@ -433,9 +540,12 @@ def report_crowd(
     # ⭐ 디스크 영구 저장 (서버 재부팅/재배포 시에도 제보 보존)
     save_crowd_data_to_disk()
 
-    # ⭐ 제보 등록 즉시 모든 캐시 무효화 (0.001초 즉시 반영)
-    CACHE_BUS_ARRIVALS.clear()
-    CACHE_XAI_ANALYSIS.clear()
+    # ⭐ 공공데이터 도착 캐시(CACHE_BUS_ARRIVALS)는 유지하여 쿼터 방어!
+    # 제보 정류장 및 연관 상행선 XAI 분석 캐시만 선택적으로 무효화
+    CACHE_XAI_ANALYSIS.pop(station_id, None)
+    if station_id in ["233002245", "233002371", "233002255", "233003021"]:
+        for st in ["233002245", "233002371", "233002255", "233003021"]:
+            CACHE_XAI_ANALYSIS.pop(st, None)
     
     cooldown_min_text = f"{dynamic_cooldown // 60}분"
     return {
@@ -562,6 +672,10 @@ def get_crowd_summary(station_id="119000302"):
                            (f"{st_name} 대기 인원 포화(비사용자 합산)로 버스 조기 만석 위험이 반영되어 1층 버스 착석 확률이 급감했습니다." if is_down else
                             f"{st_name} 대기 인원 포화로, 버스 1대 만석 초과 위험이 반영되어 착석 확률이 30% 이하로 급감했습니다."))
             color = "rose"
+        total_valid = len(valid_reports)
+        confidence = 1.0 if total_valid >= 2 else 0.70  # 1건 제보 시 70%, 2건 이상 교차 검증 시 100% 반영
+        consensus_text = f"교차 검증 완료 ({total_valid}건 제보, 신뢰도 100%)" if total_valid >= 2 else "단일 제보 접수 (신뢰도 70%)"
+
         return {
             "hasData": True,
             "status": dominant_status,
@@ -569,7 +683,9 @@ def get_crowd_summary(station_id="119000302"):
             "descText": desc_text,
             "xaiInsight": xai_insight,
             "color": color,
-            "totalCount": len(valid_reports),
+            "totalCount": total_valid,
+            "confidence": confidence,
+            "consensusText": consensus_text,
             "counts": {"smooth": cnt_smooth, "moderate": cnt_mod, "crowded": cnt_crowd},
             "lastReportMinutesAgo": last_min,
             "isPeak": is_peak,
@@ -676,11 +792,8 @@ def calc_realtime_traffic_delays(direction="UP"):
     if cached and (now - cached["timestamp"] < TRAFFIC_CACHE_TTL):
         return cached["data"]
 
-    url = "https://www.gbis.go.kr/gbis2014/schBusAPI.action"
-    data = {"cmd": "searchRouteJson", "routeId": ROUTE_REGULAR_ID}
     try:
-        r = requests.post(url, data=data, headers=GBIS_HEADERS, verify=False, timeout=4)
-        res = r.json()
+        res = fetch_gbis_route_cached()
         est = res.get("result", {}).get("estimateTime", [])
     except Exception:
         est = []
@@ -879,12 +992,28 @@ def get_xai_analysis(station_id: str = Query("119000302")):
         predict_min = b.get("predictTimeMin", 0)
 
         if is_resv:
+            full_plate = b.get("plateNo", plate)
+            clean_full = full_plate.replace(" ", "")
+            is_79_plate = any(cp in clean_full for cp in ["경기79", "79사", "79바", "79아", "79자", "경기78", "78사", "78바", "78아", "78자"])
+
+            if is_79_plate:
+                feature_name = "차량 면허 대역 (경기 79사 등 전세버스)"
+                feature_desc = f"차량번호 '{full_plate}'는 정규 경진여객(경기 70사/76아)이 아닌 외부 전세버스 면허로 식별됨"
+                decision_text = f"차량 '{full_plate}'는 경기 79사 등 외부 임차 전세버스로, 예약자 전용 차량이므로 [일반 학생 탑승 불가] 차량입니다."
+            elif plate.startswith("9"):
+                feature_name = "차량번호 대역 (9000번대 임차 전세)"
+                feature_desc = f"차량번호 '{plate}'는 9000번대 출퇴근 임차 전세버스 식별 번호로 확인됨"
+                decision_text = f"차량번호 '{plate}'는 9000번대 외부 임차 전세버스로, 예약자 전용 차량이므로 [일반 학생 탑승 불가] 차량입니다."
+            else:
+                feature_name = "GBIS 예약 노선 지정 일치"
+                feature_desc = f"차량 '{full_plate}'는 7790(예약) 전용 노선으로 인가된 차량"
+                decision_text = f"차량 '{full_plate}'는 7790(예약) 출퇴근 전세버스로, [일반 학생 탑승 불가] 차량입니다."
+
             features = [
-                {"name": "차량번호 대역 (9000번대 임차 전세)", "weight": 78, "impact": "negative", "desc": f"차량번호 '{plate}'는 전세 임차 번호판으로 식별됨"},
+                {"name": feature_name, "weight": 78, "impact": "negative", "desc": feature_desc},
                 {"name": "출퇴근 집중 배차 시간대 매칭", "weight": 14, "impact": "negative", "desc": "피크 타임 전세 투입 패턴과 일치"},
-                {"name": "GBIS 정규 인가 면허 불일치", "weight": 8, "impact": "negative", "desc": "정규 광역버스(1XXX/4XXX) 면허 외 차량"}
+                {"name": "경진여객 정규 노선 면허 불일치", "weight": 8, "impact": "negative", "desc": "정규 노선버스(경기 70사 수원 / 경기 76아 화성) 외 면허"}
             ]
-            decision_text = f"차량번호 '{plate}'는 9000번대 외부 임차 전세버스로, 예약자 전용 차량이므로 [일반 학생 탑승 불가] 차량입니다."
             confidence = 98.5
             boarding_prob = 0
             boarding_status = "탑승불가 (전세버스)"
@@ -905,18 +1034,30 @@ def get_xai_analysis(station_id: str = Query("119000302")):
 
             if not is_down:
                 current_seq = profile.get("seq", 16)
-                # ⭐ 학우 피드백(10/15) 핵심 반영: 버스의 현재 실시간 위치(남은 정류장 수) 기반 이중 차감 방지 및 상태 이관(Kalman Filter)
-                # 버스가 이미 통과한 정류장은 공공데이터 API 실시간 좌석(seats)에 이미 탑승객이 차감 반영되어 있으므로,
-                # 앞으로 실제로 거쳐야 할 정류장만 차감하고, 이미 지난 정류장은 예측치 그대로 실시간 잔여석을 신명/수원대로 이관 유지!
-                rem_stations = b.get("remainStations", 1)
-                bus_est_seq = current_seq - rem_stations
+                # ⭐ [알고리즘 정확도 혁신] GBIS 차량 위치(currentStationId) 기반 실제 seq 결정 및 스케일 불일치 해소
+                # 공공데이터 API의 remainStations는 '정차 정류장 수' 기준이라 UPSTREAM_STATION_CHAIN의 실제 노선 seq(10, 12, 14, 16)와 스케일이 불일치함
+                # 1순위: vehicles 리스트에서 해당 차량(shortPlate)의 currentStationId를 찾아 CACHED_STATIONS의 실제 seq 매핑
+                # 2순위: 미매칭 시 fallback으로 remainStations 기반 상대 체인 인덱스 계산
+                matched_v = next((v for v in vehicles if v.get("shortPlate") == plate), None)
+                bus_actual_seq = None
+                if matched_v and matched_v.get("currentStationId"):
+                    cur_st_id = str(matched_v.get("currentStationId"))
+                    st_obj = next((s for s in CACHED_STATIONS if str(s.get("id")) == cur_st_id), None)
+                    if st_obj:
+                        bus_actual_seq = st_obj.get("seq")
+
+                if bus_actual_seq is None:
+                    rem_stations = b.get("remainStations", 1)
+                    # UPSTREAM 체인 간격이 약 2씩 차이나므로 스케일 보정
+                    bus_actual_seq = max(1, current_seq - (rem_stations * 2))
 
                 for up_node in UPSTREAM_STATION_CHAIN:
                     # 버스가 아직 도달하지 않은 정류장이면서 탑승 정류장보다 앞선 정류장만 차감!
-                    if bus_est_seq <= up_node["seq"] < current_seq:
+                    if bus_actual_seq <= up_node["seq"] < current_seq:
                         st_id = up_node["id"]
                         up_summary = get_crowd_summary(station_id=st_id)
                         u_st = up_summary.get("status", "none")
+                        u_conf = up_summary.get("confidence", 1.0)  # 신뢰도 가중치 (1건 70%, 2건 이상 100%)
 
                         if st_id == "233002245":  # 효행초등학교 (기점 10번째)
                             if u_st == "crowded":
@@ -966,6 +1107,10 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                                     c_seats = 1
                                 else:
                                     c_seats = 2 if is_afternoon_rush else 1
+
+                        # 단일 제보 시 70% 신뢰도 가중치 적용하여 과민 차감 방지
+                        if u_st in ["crowded", "moderate", "smooth"]:
+                            c_seats = max(1, int(round(c_seats * u_conf)))
 
                         upstream_consumed += c_seats
 
@@ -1021,6 +1166,11 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                     tft_crowd_weight = 38
                     crowd_desc = f"대기열 분석: [{time_slot_desc}] 비사용자 포함 약 {est_waiters}명 사전 차감 반영"
                     is_from_report = False
+
+                if is_from_report:
+                    sadang_conf = crowd_info.get("confidence", 1.0)
+                    if sadang_conf < 1.0:
+                        est_waiters = max(5, int(round(est_waiters * sadang_conf)))
 
                 # 2번째, 3번째 버스일 경우: 앞선 버스 승차 후 잔여 대기열 이월 및 후속 유입 반영
                 if idx > 1 and len(target_list) >= idx:
@@ -1330,9 +1480,10 @@ def get_timetable():
         "miri": {
             "title": "7790(예약) 출근 전용 전세버스",
             "app": "경기스마트폰 앱 (MiRi)",
-            "weekdayDepartures": ["06:40", "07:00", "07:20", "07:40", "08:00"],
-            "sadangDepartures": ["07:40", "08:00", "08:20", "08:40"],
-            "note": "9000번대 임차 전세버스로 일반 현장 대기열 탑승 불가 (사전 예약자 전용)"
+            "operationRoute": "봉담(협성대·상봉초) -> 사당역 (상행 출근 편도 전용)",
+            "weekdayDepartures": ["07:30", "07:50", "08:10"],
+            "sadangDepartures": "사당역 출발 예약 없음 (전석 공차 회송 / 일반 현장 줄서기 이용)",
+            "note": "외부 임차 전세버스(경기 79사/바/아/자 및 9000번대)로 운행되며, 사당역 9번 출구에서는 예약 탑승이 없으므로 일반 정규 버스(경기 70사/76아)만 탑승 가능합니다."
         },
         "nightGuide": {
             "sadangLastBus": "00:30",
@@ -1340,3 +1491,13 @@ def get_timetable():
             "suwonUnivArrivalApprox": "새벽 01:10 ~ 01:25경 도착"
         }
     }
+
+# 브라우저 PWA /sw.js 404 방지 더미 엔드포인트
+@app.get("/sw.js")
+def get_service_worker():
+    return Response(content="// no-op service worker", media_type="application/javascript")
+
+if __name__ == "__main__":
+    import uvicorn
+    print("[INFO] 7790 타요 웹서버를 시작합니다: http://127.0.0.1:8000")
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

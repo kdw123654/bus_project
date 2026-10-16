@@ -29,16 +29,24 @@ if response.status_code == 200:
         if route_id in [ROUTE_REGULAR_ID, ROUTE_RESERVE_ID] or "7790" in route_name:
             found = True
 
-            # 전세/예약버스 여부 판별
-            if route_id == ROUTE_RESERVE_ID or "예약" in route_name:
-                bus_type = "🔴 [전세/예약 버스 - 탑승 불가 또는 예약자 전용]"
-            else:
-                bus_type = "🟢 [일반 광역버스 - 일반 버스 이용자 탑승 가능]"
-
             predict_min = bus.get("predictTime1")
             remain_stations = bus.get("locationNo1")
             remain_seats = bus.get("remainSeatCnt1")
-            plate_no = bus.get("plateNo1")
+            plate_no = str(bus.get("plateNo1", ""))
+            short_plate = plate_no[-4:] if len(plate_no) >= 4 else plate_no
+
+            # 전세/예약버스 여부 판별 (경기 79사/바/아/자 면허, 9000번대 임차, 예약 노선)
+            is_charter = (
+                route_id == ROUTE_RESERVE_ID or 
+                "예약" in route_name or 
+                short_plate.startswith("9") or 
+                any(p in plate_no for p in ["79사", "79바", "79아", "79자", "경기79", "경기 79"])
+            )
+
+            if is_charter:
+                bus_type = "🔴 [전세/예약 버스 - 탑승 불가 또는 예약자 전용]"
+            else:
+                bus_type = "🟢 [일반 광역버스 - 일반 버스 이용자 탑승 가능]"
 
             print("=" * 50)
             print(f"노선: {route_name}번 ({bus_type})")

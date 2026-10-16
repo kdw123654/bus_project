@@ -12,3 +12,7 @@ __pycache__/
 
 # VS Code 설정
 .vscode/
+
+# 런타임 캐시 및 백업 파일
+crowd_reports_cache.json
+*.bak

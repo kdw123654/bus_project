@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ko">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,40 +16,82 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Microsoft Clarity 통계 & 세션 리플레이 (프로젝트 ID: yxh0esxtcn) -->
   <script type="text/javascript">
-    (function(c,l,a,r,i,t,y){
-        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
-        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
-        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+    (function (c, l, a, r, i, t, y) {
+      c[a] = c[a] || function () { (c[a].q = c[a].q || []).push(arguments) };
+      t = l.createElement(r); t.async = 1; t.src = "https://www.clarity.ms/tag/" + i;
+      y = l.getElementsByTagName(r)[0]; y.parentNode.insertBefore(t, y);
     })(window, document, "clarity", "script", "yxh0esxtcn");
   </script>
   <style>
     @keyframes pin-float {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-3px); }
+
+      0%,
+      100% {
+        transform: translateY(0);
+      }
+
+      50% {
+        transform: translateY(-3px);
+      }
     }
-    .live-bus-pin { animation: pin-float 2s ease-in-out infinite; }
+
+    .live-bus-pin {
+      animation: pin-float 2s ease-in-out infinite;
+    }
+
     @keyframes bus-pulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.12); }
+
+      0%,
+      100% {
+        transform: scale(1);
+      }
+
+      50% {
+        transform: scale(1.12);
+      }
     }
-    .bus-pulse { animation: bus-pulse 1.8s ease-in-out infinite; }
+
+    .bus-pulse {
+      animation: bus-pulse 1.8s ease-in-out infinite;
+    }
+
     /* 가로 스크롤바 숨기기 (모바일 앱 스타일) */
-    .no-scrollbar::-webkit-scrollbar { display: none; }
-    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
   </style>
 </head>
+
 <body class="bg-gray-100 flex justify-center min-h-screen font-sans text-gray-900 antialiased">
 
+  <!-- 세련된 토스트(Toast) 알림 컨테이너 (1초 원터치 제보 및 쿨다운 알림) -->
+  <div id="toastContainer"
+    class="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center space-y-2 pointer-events-none w-11/12 max-w-sm">
+  </div>
+
   <div class="w-full max-w-md bg-white min-h-screen flex flex-col shadow-2xl relative">
-    
+
     <!-- 최상단 네비게이션 탭 -->
     <div class="grid grid-cols-2 bg-gray-100 p-1.5 border-b border-gray-200 sticky top-0 z-40">
-      <button id="tabRouteBtn" onclick="switchTab('route')" class="py-2 text-xs font-black rounded-lg transition bg-white text-blue-600 shadow-sm flex items-center justify-center space-x-1.5">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+      <button id="tabRouteBtn" onclick="switchTab('route')"
+        class="py-2 text-xs font-black rounded-lg transition bg-white text-blue-600 shadow-sm flex items-center justify-center space-x-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+        </svg>
         <span>7790 노선도</span>
       </button>
-      <button id="tabXaiBtn" onclick="switchTab('xai')" class="py-2 text-xs font-black rounded-lg transition text-gray-500 hover:text-gray-900 flex items-center justify-center space-x-1.5">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+      <button id="tabXaiBtn" onclick="switchTab('xai')"
+        class="py-2 text-xs font-black rounded-lg transition text-gray-500 hover:text-gray-900 flex items-center justify-center space-x-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        </svg>
         <span>AI 탑승·좌석 분석</span>
       </button>
     </div>
@@ -57,29 +100,58 @@
     <div class="px-3.5 py-2 bg-gray-50 border-b border-gray-200 sticky top-[45px] z-30">
       <div class="flex justify-between items-center mb-1.5">
         <div class="flex items-center space-x-1.5">
-          <svg class="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          <svg class="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
           <span class="text-xs font-black text-gray-800 tracking-tight">탑승 정류장</span>
         </div>
-        <span id="selectedStationBadge" class="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full">
+        <span id="selectedStationBadge"
+          class="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full">
           사당역 9출 (수원대행)
         </span>
       </div>
-      <div class="grid grid-cols-5 gap-1 text-center">
-        <button onclick="selectStation('119000302', '사당역9번출구앞', 'DOWN')" id="stChip_119000302" class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-black transition bg-blue-600 text-white shadow-xs">
-          사당역 9출
-        </button>
-        <button onclick="selectStation('233003021', '수원대입구', 'UP')" id="stChip_233003021" class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
-          수원대
-        </button>
-        <button onclick="selectStation('233002255', '신명아파트', 'UP')" id="stChip_233002255" class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
-          신명아파트
-        </button>
-        <button onclick="selectStation('233002371', '아이파크정문', 'UP')" id="stChip_233002371" class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
-          아이파크
-        </button>
-        <button onclick="selectStation('233002245', '효행초등학교정문', 'UP')" id="stChip_233002245" class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
-          효행초
-        </button>
+      <div class="flex items-center space-x-1.5">
+        <!-- 등교 (하행 수원대행: 사당역 9번 출구) -->
+        <div class="flex-none">
+          <div
+            class="text-[9px] font-black text-blue-600 mb-0.5 text-center flex items-center justify-center space-x-0.5">
+          </div>
+          <button onclick="selectStation('119000302', '사당역9번출구앞', 'DOWN')" id="stChip_119000302"
+            class="station-chip py-1.5 px-2.5 rounded-lg text-[11px] font-black transition bg-blue-600 text-white shadow-xs whitespace-nowrap text-center">
+            사당역 9출
+          </button>
+        </div>
+
+        <!-- 얇은 세로 구분선 (방향 전환 명시) -->
+        <div class="self-stretch w-[1.5px] bg-gray-200 mx-0.5 rounded-full my-0.5"></div>
+
+        <!-- 하교 (상행 사당역행 4개 정류장 연쇄) -->
+        <div class="flex-1 min-w-0">
+          <div
+            class="text-[9px] font-black text-emerald-600 mb-0.5 text-center flex items-center justify-center space-x-0.5">
+          </div>
+          <div class="grid grid-cols-4 gap-1 text-center">
+            <button onclick="selectStation('233003021', '수원대입구', 'UP')" id="stChip_233003021"
+              class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 text-center truncate">
+              수원대
+            </button>
+            <button onclick="selectStation('233002255', '신명아파트', 'UP')" id="stChip_233002255"
+              class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 text-center truncate">
+              신명
+            </button>
+            <button onclick="selectStation('233002371', '아이파크정문', 'UP')" id="stChip_233002371"
+              class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 text-center truncate">
+              아이파크
+            </button>
+            <button onclick="selectStation('233002245', '효행초등학교정문', 'UP')" id="stChip_233002245"
+              class="station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 text-center truncate">
+              효행초
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -92,14 +164,17 @@
           <span class="text-xs text-gray-400 font-medium">실시간 운행</span>
         </div>
         <div class="flex items-center space-x-1.5">
-          <button onclick="openTimetableModal()" class="text-[11px] font-bold px-2.5 py-1.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 flex items-center space-x-1 shadow-xs transition">
+          <button onclick="openTimetableModal()"
+            class="text-[11px] font-bold px-2.5 py-1.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 flex items-center space-x-1 shadow-xs transition">
             <span>📅</span>
             <span>시간표</span>
           </button>
-          <button onclick="scrollToTarget()" id="quickScrollBtn" class="text-[11px] bg-blue-50 text-blue-600 font-bold px-2 py-1.5 rounded-full border border-blue-200 truncate max-w-[80px]">
+          <button onclick="scrollToTarget()" id="quickScrollBtn"
+            class="text-[11px] bg-blue-50 text-blue-600 font-bold px-2 py-1.5 rounded-full border border-blue-200 truncate max-w-[80px]">
             사당역 9출
           </button>
-          <button onclick="fetchBusData()" id="refreshBtn" class="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600">
+          <button onclick="fetchBusData()" id="refreshBtn"
+            class="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600">
             🔄
           </button>
         </div>
@@ -109,7 +184,8 @@
         <div class="flex justify-between items-center mb-2.5">
           <div class="flex items-center space-x-1.5">
             <span class="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span>
-            <h2 class="text-sm font-bold text-gray-800" id="currentStationTitle">사당역9번출구앞 <span class="text-xs font-normal text-gray-500">(수원대행)</span> 실시간 도착</h2>
+            <h2 class="text-sm font-bold text-gray-800" id="currentStationTitle">사당역9번출구앞 <span
+                class="text-xs font-normal text-gray-500">(수원대행)</span> 실시간 도착</h2>
           </div>
           <span class="text-[11px] text-gray-400" id="updateTime">15초 자동 갱신</span>
         </div>
@@ -121,15 +197,21 @@
         <div id="routeCrowdCard" class="mt-3 p-3.5 bg-white rounded-xl border border-blue-200 shadow-xs space-y-2.5">
           <div class="flex justify-between items-center">
             <div class="flex items-center space-x-1.5">
-              <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
-              <span id="routeCrowdTitle" class="text-xs font-black text-gray-900 tracking-tight">사당역 9번 출구 대기열 실시간 현황</span>
+              <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              <span id="routeCrowdTitle" class="text-xs font-black text-gray-900 tracking-tight">사당역 9번 출구 대기열 실시간
+                현황</span>
             </div>
-            <span id="rushHourBadge" class="hidden text-[10px] bg-amber-50 text-amber-800 font-bold px-2 py-0.5 rounded-full border border-amber-300">
+            <span id="rushHourBadge"
+              class="hidden text-[10px] bg-amber-50 text-amber-800 font-bold px-2 py-0.5 rounded-full border border-amber-300">
               하교 피크 (15:25~17:30)
             </span>
           </div>
           <p id="routeCrowdDesc" class="text-[11px] text-gray-500 leading-snug">
-            학우들의 실시간 줄 제보가 AI 분석 모델에 반영됩니다. 상세 탑승 확률과 분석 리포트는 상단 <button onclick="switchTab('xai')" class="text-indigo-600 font-bold underline">[AI 탑승·좌석 분석]</button> 탭에서 확인하세요.
+            학우들의 실시간 줄 제보가 AI 분석 모델에 반영됩니다. 상세 탑승 확률과 분석 리포트는 상단 <button onclick="switchTab('xai')"
+              class="text-indigo-600 font-bold underline">[AI 탑승·좌석 분석]</button> 탭에서 확인하세요.
           </p>
           <div class="pt-2 border-t border-gray-100">
             <div class="flex justify-between items-center text-[10px] text-gray-400 mb-1.5 font-bold">
@@ -138,22 +220,31 @@
             </div>
             <div id="crowdReportBtnArea">
               <div class="grid grid-cols-3 gap-1.5">
-                <button onclick="sendCrowdReport('smooth')" class="py-2 px-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 active:scale-95 border border-emerald-300 text-emerald-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
-                  <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block mr-1"></span>여유</span>
+                <button onclick="sendCrowdReport('smooth')"
+                  class="py-2 px-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 active:scale-95 border border-emerald-300 text-emerald-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
+                  <span class="flex items-center"><span
+                      class="w-2 h-2 rounded-full bg-emerald-500 inline-block mr-1"></span>여유</span>
                   <span class="text-[9px] font-medium text-emerald-600 mt-0.5">&lt;15명 대기</span>
                 </button>
-                <button onclick="sendCrowdReport('moderate')" class="py-2 px-1 rounded-lg bg-amber-50 hover:bg-amber-100 active:scale-95 border border-amber-300 text-amber-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
-                  <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block mr-1"></span>보통</span>
+                <button onclick="sendCrowdReport('moderate')"
+                  class="py-2 px-1 rounded-lg bg-amber-50 hover:bg-amber-100 active:scale-95 border border-amber-300 text-amber-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
+                  <span class="flex items-center"><span
+                      class="w-2 h-2 rounded-full bg-amber-500 inline-block mr-1"></span>보통</span>
                   <span class="text-[9px] font-medium text-amber-600 mt-0.5">15~25명 내외</span>
                 </button>
-                <button onclick="sendCrowdReport('crowded')" class="py-2 px-1 rounded-lg bg-rose-50 hover:bg-rose-100 active:scale-95 border border-rose-300 text-rose-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
-                  <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-rose-500 inline-block mr-1"></span>포화</span>
+                <button onclick="sendCrowdReport('crowded')"
+                  class="py-2 px-1 rounded-lg bg-rose-50 hover:bg-rose-100 active:scale-95 border border-rose-300 text-rose-800 text-[11px] font-black transition flex flex-col items-center shadow-xs">
+                  <span class="flex items-center"><span
+                      class="w-2 h-2 rounded-full bg-rose-500 inline-block mr-1"></span>포화</span>
                   <span class="text-[9px] font-medium text-rose-600 mt-0.5">줄 길게 늘어섬</span>
                 </button>
               </div>
             </div>
-            <div class="mt-2 pt-1.5 border-t border-gray-100/60 flex items-center justify-between text-[10px] text-gray-400">
-              <span class="flex items-center"><span class="w-1.5 h-1.5 rounded-full bg-blue-500 mr-1 inline-block"></span>제보 부재 시에도 GBIS 텔레메트리 자동 분석 가동 중</span>
+            <div
+              class="mt-2 pt-1.5 border-t border-gray-100/60 flex items-center justify-between text-[10px] text-gray-400">
+              <span class="flex items-center"><span
+                  class="w-1.5 h-1.5 rounded-full bg-blue-500 mr-1 inline-block"></span>제보 부재 시에도 GBIS 텔레메트리 자동 분석 가동
+                중</span>
               <span class="text-blue-600 font-medium">1초 터치 기여</span>
             </div>
           </div>
@@ -167,29 +258,36 @@
 
     <!-- ================= [뷰 2: XAI 설명 가능한 인공지능 분석] ================= -->
     <div id="xaiView" class="hidden flex-1 flex flex-col p-4 space-y-4 overflow-y-auto">
-      
+
       <!-- 상단 탑승 정류장 상태 & 새로고침 바 -->
-      <div class="flex justify-between items-center bg-gray-50/90 px-3.5 py-2.5 rounded-2xl border border-gray-200 shadow-2xs">
+      <div
+        class="flex justify-between items-center bg-gray-50/90 px-3.5 py-2.5 rounded-2xl border border-gray-200 shadow-2xs">
         <div class="flex items-center space-x-1.5 min-w-0">
           <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping flex-shrink-0"></span>
           <span class="text-xs font-black text-gray-800 flex-shrink-0">탑승 정류장:</span>
           <span id="xaiStationTag" class="text-xs font-black text-blue-600 truncate">사당역9번출구앞</span>
           <span class="text-[10px] text-gray-400 font-normal ml-1 flex-shrink-0" id="xaiUpdateTime">15초 자동 갱신</span>
         </div>
-        <button onclick="fetchXaiData(false)" id="xaiRefreshBtn" class="flex-shrink-0 ml-2 py-1 px-2.5 rounded-full border border-indigo-200 bg-white hover:bg-indigo-50 text-indigo-700 text-[11px] font-bold flex items-center space-x-1 shadow-xs transition active:scale-95">
+        <button onclick="fetchXaiData(false)" id="xaiRefreshBtn"
+          class="flex-shrink-0 ml-2 py-1 px-2.5 rounded-full border border-indigo-200 bg-white hover:bg-indigo-50 text-indigo-700 text-[11px] font-bold flex items-center space-x-1 shadow-xs transition active:scale-95">
           <span id="xaiRefreshIcon" class="inline-block text-xs">🔄</span>
           <span>새로고침</span>
         </button>
       </div>
 
       <!-- 상단 안내 헤더 -->
-      <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 text-white p-4 rounded-2xl shadow-md space-y-2.5">
+      <div
+        class="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 text-white p-4 rounded-2xl shadow-md space-y-2.5">
         <div class="flex justify-between items-center">
           <div class="flex items-center space-x-1.5">
-            <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
             <span class="text-xs font-black tracking-wide">7790 스마트 탑승 진단 AI</span>
           </div>
-          <span class="text-[10px] bg-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full font-bold border border-indigo-400/30">실시간 좌석 분석</span>
+          <span
+            class="text-[10px] bg-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full font-bold border border-indigo-400/30">실시간
+            좌석 분석</span>
         </div>
         <h2 id="xaiHeaderTitle" class="text-sm font-black tracking-tight">7790 실시간 좌석 & 탑승 분석</h2>
         <p id="xaiHeaderDesc" class="text-[11px] text-indigo-200 leading-snug">
@@ -207,7 +305,7 @@
     </div>
 
     <footer class="py-2.5 bg-gray-50 border-t border-gray-200 text-center text-[11px] text-gray-400">
-      수원대학교 데이터과학부 
+      수원대학교 데이터과학부
     </footer>
   </div>
 
@@ -218,18 +316,83 @@
     let selectedDirection = "DOWN";
     let currentXaiRequestId = 0;
 
+    // 익명 UUID 기반 클라이언트 ID 발급 (캠퍼스 공유 Wi-Fi 환경 개인별 쿨다운 분리)
+    function getClientId() {
+      let cid = localStorage.getItem('bus_client_uuid');
+      if (!cid) {
+        if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+          cid = crypto.randomUUID();
+        } else {
+          cid = 'usr_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+        }
+        localStorage.setItem('bus_client_uuid', cid);
+      }
+      return cid;
+    }
+
+    // 부드러운 앱 스타일 토스트(Toast) 알림 배너 (alert 대체)
+    function showToast(message, type = 'info', duration = 2600) {
+      const container = document.getElementById('toastContainer');
+      if (!container) return;
+      const toast = document.createElement('div');
+
+      let bgClass = "bg-slate-900 text-white border-slate-700 shadow-slate-900/40";
+      let icon = "ℹ️";
+      if (type === 'success') {
+        bgClass = "bg-emerald-600 text-white border-emerald-500 shadow-emerald-600/30";
+        icon = "✅";
+      } else if (type === 'error' || type === 'danger') {
+        bgClass = "bg-rose-600 text-white border-rose-500 shadow-rose-600/30";
+        icon = "⚠️";
+      } else if (type === 'warning') {
+        bgClass = "bg-amber-500 text-white border-amber-400 shadow-amber-500/30";
+        icon = "⏱️";
+      }
+
+      toast.className = `pointer-events-auto flex items-center space-x-2 px-3.5 py-2.5 rounded-2xl shadow-xl text-xs font-bold border transition-all duration-300 transform -translate-y-2 opacity-0 ${bgClass}`;
+      toast.innerHTML = `<span class="text-sm flex-shrink-0">${icon}</span><span class="flex-1 leading-snug">${message.replace(/\n/g, '<br>')}</span>`;
+      container.appendChild(toast);
+
+      requestAnimationFrame(() => {
+        toast.classList.remove('-translate-y-2', 'opacity-0');
+        toast.classList.add('translate-y-0', 'opacity-100');
+      });
+
+      setTimeout(() => {
+        toast.classList.remove('translate-y-0', 'opacity-100');
+        toast.classList.add('-translate-y-2', 'opacity-0');
+        setTimeout(() => toast.remove(), 350);
+      }, duration);
+    }
+
+    // 경기 79사 등 전세 면허 및 9000번대 임차 전세 판별 헬퍼
+    function isCharterOrReservedBus(bus) {
+      if (!bus) return false;
+      if (bus.isReserved) return true;
+      const plate = (bus.plateNo || "").replace(/\s/g, "");
+      const short = (bus.shortPlate || "").replace(/\s/g, "");
+      if (short.startsWith("9")) return true;
+      const charterMarkers = ["경기79", "79사", "79바", "79아", "79자", "경기78", "78사", "78바", "78아", "78자"];
+      for (const m of charterMarkers) {
+        if (plate.includes(m)) return true;
+      }
+      return false;
+    }
+
     function selectStation(id, name, dir) {
       selectedStationId = id;
       selectedStationName = name;
       selectedDirection = dir;
 
-      // 1. 공통 상단 칩 UI 업데이트 (5개 균등 배치)
+      // 1. 공통 상단 칩 UI 업데이트 (등교 vs 하교 방향 유지하며 활성 상태 토글)
       document.querySelectorAll(".station-chip").forEach(el => {
-        el.className = "station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100";
+        el.classList.remove("bg-blue-600", "text-white", "shadow-xs", "font-black");
+        el.classList.add("bg-white", "text-gray-700", "border", "border-gray-200", "hover:bg-gray-100", "font-bold");
       });
       const activeChip = document.getElementById(`stChip_${id}`);
       if (activeChip) {
-        activeChip.className = "station-chip py-1.5 px-0.5 rounded-lg text-[11px] font-black transition bg-blue-600 text-white shadow-xs";
+        activeChip.classList.remove("bg-white", "text-gray-700", "border-gray-200", "hover:bg-gray-100", "font-bold");
+        activeChip.classList.add("bg-blue-600", "text-white", "shadow-xs", "font-black");
       }
 
       const dirText = dir === "UP" ? "사당역행" : "수원대행";
@@ -365,19 +528,24 @@
       }
     }
 
-    // ⭐ 학우 실시간 줄 제보 전송 함수 (도착 주기 연동 쿨다운, 정류장별 독립)
+    // ⭐ 학우 실시간 줄 제보 전송 함수 (도착 주기 연동 쿨다운, 정류장별 독립, 토스트 알림 연동)
     async function sendCrowdReport(status) {
       const remaining = checkCrowdCooldown(selectedStationId);
       if (remaining > 0) {
         const min = Math.floor(remaining / 60000);
         const sec = Math.floor((remaining % 60000) / 1000);
-        alert(`⏱️ 도착 버스 주기 연동으로 ${selectedStationName}은(는) ${min}분 ${sec}초 후 다시 제보할 수 있습니다.`);
+        showToast(`도착 버스 주기 연동으로 ${selectedStationName}은(는) ${min}분 ${sec}초 후 다시 제보할 수 있습니다.`, 'warning');
         return;
       }
 
       try {
         const targetStId = selectedStationId;
-        const res = await fetch(`/api/crowd-report?station_id=${targetStId}&status=${encodeURIComponent(status)}`, { method: "POST" });
+        const res = await fetch(`/api/crowd-report?station_id=${targetStId}&status=${encodeURIComponent(status)}`, {
+          method: "POST",
+          headers: {
+            "X-Client-Id": getClientId()
+          }
+        });
         const data = await res.json();
         if (data.success) {
           const cooldownSec = data.cooldownSec || 300;
@@ -388,7 +556,7 @@
           localStorage.setItem("last_crowd_report_time", Date.now());
           localStorage.setItem("last_crowd_cooldown_ms", String(cooldownSec * 1000));
           updateCrowdButtonsUI();
-          alert(data.message || `✅ ${selectedStationName} 줄 제보가 접수되었습니다!\n학우님의 1초 기여로 실시간 AI 탑승 예측 모델이 더욱 정교해졌습니다`);
+          showToast(data.message || `소중한 제보 감사합니다! 실시간 AI 탑승 예측 모델에 즉시 반영되었습니다.`, 'success');
           fetchBusData();
           if (currentTab === 'xai') fetchXaiData(true);
         } else {
@@ -398,10 +566,10 @@
             localStorage.setItem("last_crowd_cooldown_ms_" + resStId, String(data.remainCooldown * 1000));
             updateCrowdButtonsUI();
           }
-          alert(data.message || "제보 처리에 실패했습니다.");
+          showToast(data.message || "제보 처리에 실패했습니다.", 'danger');
         }
       } catch (err) {
-        alert("제보 통신 오류가 발생했습니다: " + err.message);
+        showToast("제보 통신 오류가 발생했습니다: " + err.message, 'danger');
       }
     }
 
@@ -483,8 +651,8 @@
           dotColor = "bg-rose-500";
         }
 
-        const crowdTimeStr = crowd.lastReportMinutesAgo === null 
-          ? "제보 대기 중" 
+        const crowdTimeStr = crowd.lastReportMinutesAgo === null
+          ? "제보 대기 중"
           : (crowd.lastReportMinutesAgo === 0 ? "방금 전 제보" : `${crowd.lastReportMinutesAgo}분 전 제보`);
 
         const crowdCardHTML = `
@@ -762,8 +930,8 @@
         if (crowd) {
           const time = document.getElementById("routeCrowdTime");
           if (time) {
-            time.innerText = crowd.lastReportMinutesAgo === null 
-              ? "최근 5분 0건" 
+            time.innerText = crowd.lastReportMinutesAgo === null
+              ? "최근 5분 0건"
               : `최근 5분 ${crowd.totalCount}건 (${crowd.lastReportMinutesAgo === 0 ? "방금 전" : crowd.lastReportMinutesAgo + "분 전"})`;
           }
           const badge = document.getElementById("rushHourBadge");
@@ -799,9 +967,10 @@
           }
         } else {
           arrivalContainer.innerHTML = arrivals.map(bus => {
-            const isReserved = bus.isReserved || (bus.shortPlate && bus.shortPlate.startsWith("9"));
+            const isReserved = isCharterOrReservedBus(bus);
+            const is79Plate = (bus.plateNo || "").includes("79");
             const badgeBg = isReserved ? "bg-rose-600 text-white" : "bg-emerald-600 text-white";
-            const badgeText = isReserved ? "🔴 전세 (탑승불가)" : "🟢 일반 (탑승가능)";
+            const badgeText = isReserved ? (is79Plate ? "🔴 전세 (경기79사)" : "🔴 전세 (탑승불가)") : "🟢 일반 (탑승가능)";
             const cardBg = isReserved ? "bg-rose-50 border-rose-300" : "bg-white border-gray-200";
 
             return `
@@ -817,6 +986,7 @@
                     <div class="text-[11px] text-gray-400 flex items-center space-x-1.5 mt-0.5">
                       <span>${bus.shortPlate} · 잔여 ${bus.remainSeats}석</span>
                       ${bus.isDoubleDecker ? '<span class="px-1.5 py-0.2 bg-indigo-100 text-indigo-700 font-black rounded text-[10px]">2층 버스 (71석)</span>' : '<span class="px-1.5 py-0.2 bg-gray-100 text-gray-600 font-bold rounded text-[10px]">1층 버스</span>'}
+                      ${is79Plate ? '<span class="px-1.5 py-0.2 bg-rose-100 text-rose-700 font-black rounded text-[10px]">전세면허(79)</span>' : ''}
                     </div>
                   </div>
                 </div>
@@ -840,7 +1010,7 @@
           let nodeDot = '';
           if (hasBus) {
             const firstBus = matchedVehicles[0];
-            const isResv = firstBus.isReserved || (firstBus.shortPlate && firstBus.shortPlate.startsWith("9"));
+            const isResv = isCharterOrReservedBus(firstBus);
             // 일반 버스는 빨간 원형 뱃지, 전세 버스는 로즈색 뱃지
             const busBg = isResv ? 'bg-rose-600 ring-rose-200' : 'bg-red-500 ring-red-200';
             nodeDot = `
@@ -862,7 +1032,7 @@
           let vehicleInfoHTML = "";
           if (hasBus) {
             vehicleInfoHTML = matchedVehicles.map(v => {
-              const isResv = v.isReserved || (v.shortPlate && v.shortPlate.startsWith("9"));
+              const isResv = isCharterOrReservedBus(v);
               const badgeBorder = isResv ? "border-rose-400 bg-rose-50 text-rose-800" : "border-emerald-500 bg-emerald-50 text-emerald-800";
               const tagBg = isResv ? "bg-rose-600 text-white" : "bg-emerald-600 text-white";
               const tagText = isResv ? "전세" : "일반";
@@ -1085,7 +1255,7 @@
           ttLiveArrivals = data.arrivingBuses || [];
           renderKakaoTimetable();
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // 📅 카카오맵 스타일 시간표 모달 열기/닫기 및 렌더링 함수
@@ -1249,8 +1419,8 @@
           const expH = Math.floor(arrTotal / 60) % 24;
           const expM = arrTotal % 60;
           const is2F = nextBus.isDoubleDecker;
-          const deckBadge = is2F 
-            ? '<span class="px-1.5 py-0.2 bg-indigo-100 text-indigo-700 font-black rounded text-[9px]">2층 버스</span>' 
+          const deckBadge = is2F
+            ? '<span class="px-1.5 py-0.2 bg-indigo-100 text-indigo-700 font-black rounded text-[9px]">2층 버스</span>'
             : '<span class="px-1.5 py-0.2 bg-gray-100 text-gray-600 font-bold rounded text-[9px]">1층 버스</span>';
 
           // 첫 번째 버스의 매칭 계획 및 지연 상태
@@ -1259,11 +1429,11 @@
           if (matchedFirst) {
             const d = matchedFirst.delay;
             if (d > 2) {
-              delayNotice = `<span class="px-1.5 py-0.5 bg-amber-100 text-amber-800 font-black rounded text-[9.5px]">⏱ 정시(${String(matchedFirst.planM).padStart(2,'0')}분) 대비 +${d}분 지연 운행</span>`;
+              delayNotice = `<span class="px-1.5 py-0.5 bg-amber-100 text-amber-800 font-black rounded text-[9.5px]">⏱ 정시(${String(matchedFirst.planM).padStart(2, '0')}분) 대비 +${d}분 지연 운행</span>`;
             } else if (d < -2) {
-              delayNotice = `<span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 font-black rounded text-[9.5px]">⏱ 정시(${String(matchedFirst.planM).padStart(2,'0')}분) 대비 ${Math.abs(d)}분 조기 운행</span>`;
+              delayNotice = `<span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 font-black rounded text-[9.5px]">⏱ 정시(${String(matchedFirst.planM).padStart(2, '0')}분) 대비 ${Math.abs(d)}분 조기 운행</span>`;
             } else {
-              delayNotice = `<span class="px-1.5 py-0.5 bg-blue-100 text-blue-800 font-black rounded text-[9.5px]">⏱ ${String(matchedFirst.planM).padStart(2,'0')}분 정시 운행 중</span>`;
+              delayNotice = `<span class="px-1.5 py-0.5 bg-blue-100 text-blue-800 font-black rounded text-[9.5px]">⏱ ${String(matchedFirst.planM).padStart(2, '0')}분 정시 운행 중</span>`;
             }
           }
 
@@ -1281,7 +1451,7 @@
               </div>
               ${delayNotice ? `
                 <div class="flex items-center justify-between pt-0.5 text-[10px] text-gray-500 pl-3.5">
-                  <span class="truncate">계획: ${String(matchedFirst.planH).padStart(2,'0')}:${String(matchedFirst.planM).padStart(2,'0')} 정시 인가 차량</span>
+                  <span class="truncate">계획: ${String(matchedFirst.planH).padStart(2, '0')}:${String(matchedFirst.planM).padStart(2, '0')} 정시 인가 차량</span>
                   ${delayNotice}
                 </div>
               ` : ''}
@@ -1308,7 +1478,7 @@
 
           if (liveMatch) {
             return `
-              <span class="text-xs font-black bg-blue-600 text-white px-2 py-0.5 rounded-full shadow-xs inline-flex items-center space-x-1 animate-pulse" title="계획: ${String(m).padStart(2,'0')}분 ➔ 실시간 예상: ${String(liveMatch.expM).padStart(2,'0')}분 (${liveMatch.liveBus.predictTimeMin}분후)">
+              <span class="text-xs font-black bg-blue-600 text-white px-2 py-0.5 rounded-full shadow-xs inline-flex items-center space-x-1 animate-pulse" title="계획: ${String(m).padStart(2, '0')}분 ➔ 실시간 예상: ${String(liveMatch.expM).padStart(2, '0')}분 (${liveMatch.liveBus.predictTimeMin}분후)">
                 <span>●</span>
                 <span>${String(m).padStart(2, '0')}</span>
                 <span class="text-[9.5px] text-amber-200 font-black">➔ ${String(liveMatch.expM).padStart(2, '0')}분<span class="text-[8.5px] opacity-90 font-normal">(${liveMatch.liveBus.predictTimeMin}분후)</span></span>
@@ -1352,9 +1522,11 @@
   </script>
 
   <!-- 📅 7790번 정류장별 도착 예상 시간표 모달 (카카오맵 스타일) -->
-  <div id="timetableModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-    <div class="bg-white rounded-3xl max-w-sm w-full p-4.5 shadow-2xl space-y-3 border border-gray-100 max-h-[88vh] flex flex-col">
-      
+  <div id="timetableModal"
+    class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+    <div
+      class="bg-white rounded-3xl max-w-sm w-full p-4.5 shadow-2xl space-y-3 border border-gray-100 max-h-[88vh] flex flex-col">
+
       <!-- 헤더 -->
       <div class="flex justify-between items-center pb-2 border-b border-gray-100">
         <div class="flex items-center space-x-1.5">
@@ -1363,29 +1535,36 @@
             <h3 class="text-sm font-black text-gray-900 tracking-tight">도착 예상 시간표</h3>
           </div>
         </div>
-        <button onclick="closeTimetableModal()" class="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 font-bold flex items-center justify-center text-xs transition">✕</button>
+        <button onclick="closeTimetableModal()"
+          class="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 font-bold flex items-center justify-center text-xs transition">✕</button>
       </div>
 
       <!-- 정류장 선택 칩 (5개 정류장 지원) -->
       <div class="space-y-1">
         <div class="flex justify-between items-center px-0.5">
           <span class="text-[11px] font-bold text-gray-500">📍 조회 정류장</span>
-          <span id="ttHeaderStationName" class="text-xs font-black text-blue-600 truncate max-w-[200px]">수원대입구 (사당역행)</span>
+          <span id="ttHeaderStationName" class="text-xs font-black text-blue-600 truncate max-w-[200px]">수원대입구
+            (사당역행)</span>
         </div>
         <div class="grid grid-cols-5 gap-1 text-center bg-gray-50 p-1 rounded-xl border border-gray-200">
-          <button onclick="selectTtStation('233003021')" id="ttChip_233003021" class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-black transition bg-slate-900 text-white shadow-xs">
+          <button onclick="selectTtStation('233003021')" id="ttChip_233003021"
+            class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-black transition bg-slate-900 text-white shadow-xs">
             수원대
           </button>
-          <button onclick="selectTtStation('233002255')" id="ttChip_233002255" class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+          <button onclick="selectTtStation('233002255')" id="ttChip_233002255"
+            class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
             신명
           </button>
-          <button onclick="selectTtStation('233002371')" id="ttChip_233002371" class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+          <button onclick="selectTtStation('233002371')" id="ttChip_233002371"
+            class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
             아이파크
           </button>
-          <button onclick="selectTtStation('233002245')" id="ttChip_233002245" class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+          <button onclick="selectTtStation('233002245')" id="ttChip_233002245"
+            class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
             효행초
           </button>
-          <button onclick="selectTtStation('119000302')" id="ttChip_119000302" class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
+          <button onclick="selectTtStation('119000302')" id="ttChip_119000302"
+            class="tt-st-chip py-1 px-1 rounded-lg text-[11px] font-bold transition bg-white text-gray-700 border border-gray-200 hover:bg-gray-100">
             사당역 9출
           </button>
         </div>
@@ -1393,10 +1572,12 @@
 
       <!-- 요일 선택 탭 (평일 / 주말공휴일 2개만 깔끔하게 유지) -->
       <div class="flex space-x-1.5 pt-0.5">
-        <button id="ttDayBtn_weekday" onclick="selectTtDay('weekday')" class="py-2 px-3 rounded-xl font-black bg-blue-600 text-white shadow-xs transition flex-1 text-center text-xs">
+        <button id="ttDayBtn_weekday" onclick="selectTtDay('weekday')"
+          class="py-2 px-3 rounded-xl font-black bg-blue-600 text-white shadow-xs transition flex-1 text-center text-xs">
           평일 (월 ~ 금)
         </button>
-        <button id="ttDayBtn_weekend" onclick="selectTtDay('weekend')" class="py-2 px-3 rounded-xl font-bold bg-white text-gray-600 hover:text-gray-900 border border-gray-200 transition flex-1 text-center text-xs">
+        <button id="ttDayBtn_weekend" onclick="selectTtDay('weekend')"
+          class="py-2 px-3 rounded-xl font-bold bg-white text-gray-600 hover:text-gray-900 border border-gray-200 transition flex-1 text-center text-xs">
           토·일·공휴일
         </button>
       </div>
@@ -1413,26 +1594,45 @@
 
       <!-- 카카오맵 스타일 시간대별 테이블 -->
       <div class="flex-1 flex flex-col min-h-0 space-y-1">
-        <div class="grid grid-cols-12 bg-gray-100 py-1.5 px-3 text-[10px] font-bold text-gray-500 rounded-t-xl border border-b-0 border-gray-200">
+        <div
+          class="grid grid-cols-12 bg-gray-100 py-1.5 px-3 text-[10px] font-bold text-gray-500 rounded-t-xl border border-b-0 border-gray-200">
           <span class="col-span-3">시간</span>
           <span class="col-span-9">도착 예정 분 (단위: 분)</span>
         </div>
-        <div id="ttTableBody" class="overflow-y-auto max-h-[42vh] pr-0.5 divide-y divide-gray-100 border border-gray-200 rounded-b-xl bg-white shadow-inner">
+        <div id="ttTableBody"
+          class="overflow-y-auto max-h-[42vh] pr-0.5 divide-y divide-gray-100 border border-gray-200 rounded-b-xl bg-white shadow-inner">
           <!-- 시간표 행들이 JS로 렌더링됨 -->
         </div>
       </div>
 
       <!-- 하단 안내 문구 -->
-      <div class="bg-blue-50/60 border border-blue-100 rounded-xl p-2 space-y-0.5 text-[10px] text-gray-600 leading-snug">
+      <div
+        class="bg-blue-50/60 border border-blue-100 rounded-xl p-2 space-y-0.5 text-[10px] text-gray-600 leading-snug">
         <p class="font-bold text-blue-900">💡 <strong>시간표와 실시간 도착 안내:</strong></p>
         <p>• <strong>시간표 숫자:</strong> 운수사 공식 <strong>정시 배차 계획표</strong>입니다.</p>
-        <p>• <strong>실시간 운행:</strong> 도로 정체·신호 대기로 실제 도착 시각이 계획과 약 ±3~7분 다를 수 있으며, 현재 오고 있는 버스는 상단 및 <span class="text-blue-700 font-bold">● 파란 뱃지</span>로 바로 확인하실 수 있습니다.</p>
+        <p>• <strong>실시간 운행:</strong> 도로 정체·신호 대기로 실제 도착 시각이 계획과 약 ±3~7분 다를 수 있으며, 현재 오고 있는 버스는 상단 및 <span
+            class="text-blue-700 font-bold">● 파란 뱃지</span>로 바로 확인하실 수 있습니다.</p>
       </div>
 
-      <button onclick="closeTimetableModal()" class="w-full py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl text-xs font-black transition shadow-sm">
+      <!-- 🌙 심야 막차 가이드 (사당역 00:30 막차 탑승 꿀팁) -->
+      <div
+        class="bg-amber-50/80 border border-amber-200 rounded-xl p-2.5 text-[10px] text-amber-950 leading-snug space-y-1">
+        <div class="flex items-center space-x-1 font-black text-amber-900">
+          <span>🌙</span><span>사당역 심야 막차 탑승 꿀팁</span>
+        </div>
+        <p>• <strong>사당역 막차 출발:</strong> <span class="font-black text-red-600">00:30</span> (수원대 방면 회차)</p>
+        <p>• <strong>안전 탑승 권장 줄서기:</strong> <span class="font-bold text-amber-900">23:50 ~ 00:10</span> (사당역 9번 출구 앞)
+        </p>
+        <p class="text-amber-800 text-[9.5px]">※ 자정 전후 사당역에는 귀가 학우와 시민 대기열이 길어지므로, 00:10 이전에 줄을 서셔야 안전하게 착석 탑승하실 수 있습니다.
+        </p>
+      </div>
+
+      <button onclick="closeTimetableModal()"
+        class="w-full py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl text-xs font-black transition shadow-sm">
         닫기
       </button>
     </div>
   </div>
 </body>
+
 </html>
