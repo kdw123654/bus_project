@@ -366,6 +366,17 @@
       }, duration);
     }
 
+    // DOM XSS 방어 문자열 이스케이프 헬퍼
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
     // 경기 79사 등 전세 면허 및 9000번대 임차 전세 판별 헬퍼
     function isCharterOrReservedBus(bus) {
       if (!bus) return false;
@@ -380,10 +391,40 @@
       return false;
     }
 
+    // ⭐ XAI 탭 하단 7790 온라인 자동학습 카드 정류장별(사당역 vs 수원대) 탭 전환 헬퍼
+    window.currentMlTab = 'sadang';
+    function setMlTab(tab) {
+      window.currentMlTab = tab;
+      const btnSadang = document.getElementById("mlTabBtnSadang");
+      const btnSuwon = document.getElementById("mlTabBtnSuwon");
+      const contentSadang = document.getElementById("mlTabContentSadang");
+      const contentSuwon = document.getElementById("mlTabContentSuwon");
+
+      if (btnSadang && btnSuwon) {
+        if (tab === 'sadang') {
+          btnSadang.className = "py-1 px-2 rounded-md text-center font-bold transition-all bg-indigo-600 text-white";
+          btnSuwon.className = "py-1 px-2 rounded-md text-center font-bold transition-all text-slate-400 hover:text-slate-200";
+        } else {
+          btnSuwon.className = "py-1 px-2 rounded-md text-center font-bold transition-all bg-indigo-600 text-white";
+          btnSadang.className = "py-1 px-2 rounded-md text-center font-bold transition-all text-slate-400 hover:text-slate-200";
+        }
+      }
+      if (contentSadang && contentSuwon) {
+        if (tab === 'sadang') {
+          contentSadang.classList.remove("hidden");
+          contentSuwon.classList.add("hidden");
+        } else {
+          contentSuwon.classList.remove("hidden");
+          contentSadang.classList.add("hidden");
+        }
+      }
+    }
+
     function selectStation(id, name, dir) {
       selectedStationId = id;
       selectedStationName = name;
       selectedDirection = dir;
+      window.currentMlTab = (dir === "UP" ? "suwon" : "sadang");
 
       // 1. 공통 상단 칩 UI 업데이트 (등교 vs 하교 방향 유지하며 활성 상태 토글)
       document.querySelectorAll(".station-chip").forEach(el => {
@@ -399,7 +440,7 @@
       const dirText = dir === "UP" ? "사당역행" : "수원대행";
       const titleEl = document.getElementById("currentStationTitle");
       if (titleEl) {
-        titleEl.innerHTML = `${name} <span class="text-xs font-normal text-gray-500">(${dirText})</span> 실시간 도착`;
+        titleEl.innerHTML = `${escapeHtml(name)} <span class="text-xs font-normal text-gray-500">(${escapeHtml(dirText)})</span> 실시간 도착`;
       }
       const quickScrollBtn = document.getElementById("quickScrollBtn");
       if (quickScrollBtn) {
@@ -617,11 +658,19 @@
           boardingTip: '출도착 시간을 확인하여 탑승하세요.'
         };
 
+        const ol = data.onlineLearning || {};
+        const sadangLearned = ol.sadangTotalLearnedBuses ?? ol.totalSadangLearned ?? 0;
+        const upstreamLearned = ol.upstreamTotalLearnedBuses ?? ol.totalUpstreamLearned ?? 0;
+        const mlWeight = ol.mlWeightPct ?? 15;
+        const lastSadang = ol.lastSadangRecord;
+        const lastUpstream = ol.lastUpstreamRecord;
+        const totalActiveBuses = data.modelMeta?.totalActiveBuses || 0;
+
         // 상단 안내 헤더 동적 반영
         const xaiTitle = document.getElementById("xaiHeaderTitle");
         const xaiDesc = document.getElementById("xaiHeaderDesc");
         if (xaiTitle) xaiTitle.innerText = `${meta.name} (${meta.dirText}) AI 탑승 & 잔여 좌석 분석`;
-        if (xaiDesc) xaiDesc.innerHTML = `${meta.summary}`;
+        if (xaiDesc) xaiDesc.innerText = meta.summary;
 
         // 0. 정류장 대기열 제보 영향도 분석 카드 (사당역 및 수원대·봉담 전 정류장 100% 지원)
         const crowd = data.crowdData || {
@@ -665,7 +714,7 @@
               </div>
               <div class="flex items-center space-x-1 flex-wrap justify-end gap-y-1">
                 ${crowd.isSticky ? '<span class="text-[9px] bg-purple-50 text-purple-700 font-bold px-1.5 py-0.5 rounded border border-purple-300 whitespace-nowrap flex-shrink-0">버스 승차 대기 잔류</span>' : ''}
-                ${(crowd.isPeak || crowd.isAfternoonRush) ? `<span class="text-[9px] ${crowd.isFridayNight ? 'bg-rose-100 text-rose-800 border-rose-300' : 'bg-amber-100 text-amber-800 border-amber-300'} font-bold px-1.5 py-0.5 rounded border whitespace-nowrap flex-shrink-0">${crowd.peakName || '하교 피크 (15:25~17:30)'}</span>` : ''}
+                ${(crowd.isPeak || crowd.isAfternoonRush) && crowd.peakName ? `<span class="text-[9px] bg-amber-100 text-amber-800 border border-amber-300 font-bold px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0">${escapeHtml(crowd.peakName)}</span>` : ''}
                 <span class="text-[9.5px] sm:text-[10px] bg-indigo-50 text-indigo-700 font-bold px-1.5 sm:px-2 py-0.5 rounded-full border border-indigo-200 whitespace-nowrap flex-shrink-0">
                   학우 제보 Feature
                 </span>
@@ -715,13 +764,13 @@
           stationCardHTML += `
             <div class="p-3.5 bg-blue-50/70 rounded-2xl border border-blue-200 text-xs space-y-1.5">
               <div class="flex justify-between items-center">
-                <span class="font-black text-blue-900">${meta.name} 상행 특성 분석</span>
+                <span class="font-black text-blue-900">${escapeHtml(meta.name)} 상행 특성 분석</span>
                 <span class="text-[10px] text-blue-700 font-bold">기점 ${meta.seq ? meta.seq + '번째' : '상행'}</span>
               </div>
-              <p class="text-[11px] text-gray-700 leading-snug">${meta.summary}</p>
+              <p class="text-[11px] text-gray-700 leading-snug">${escapeHtml(meta.summary)}</p>
               <div class="pt-1 text-[11px] text-amber-800 font-medium flex items-start space-x-1">
                 <span class="font-bold flex-shrink-0">💡 탑승 팁:</span>
-                <span>${meta.boardingTip}</span>
+                <span>${escapeHtml(meta.boardingTip)}</span>
               </div>
             </div>
           `;
@@ -729,7 +778,7 @@
           stationCardHTML += `
             <div class="p-3.5 bg-indigo-50/70 rounded-2xl border border-indigo-200 text-xs space-y-1.5">
               <div class="flex justify-between items-center">
-                <span class="font-black text-indigo-900">${meta.name} 하행(수원대행) 탑승 분석</span>
+                <span class="font-black text-indigo-900">${escapeHtml(meta.name)} 하행(수원대행) 탑승 분석</span>
                 <span class="text-[10px] text-indigo-700 font-bold">회차점 · 빈 차 진입</span>
               </div>
               <p class="text-[11px] text-gray-700 leading-snug">사당역은 전원 하차 후 빈 차로 진입하므로, <strong>출구 앞 대기열(서비스 미사용자 포함)</strong>이 착석 여부를 결정합니다.</p>
@@ -747,7 +796,7 @@
           busCardsHTML = `
             <div class="p-6 bg-white rounded-2xl border border-gray-200 text-center space-y-2 shadow-xs">
               <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mx-auto text-lg text-gray-400">🚌</div>
-              <h4 class="text-xs font-black text-gray-800">현재 ${meta.name} 정류장으로 운행/도착 예정인 버스가 없습니다</h4>
+              <h4 class="text-xs font-black text-gray-800">현재 ${escapeHtml(meta.name)} 정류장으로 운행/도착 예정인 버스가 없습니다</h4>
               <p class="text-[11px] text-gray-500 leading-relaxed max-w-[280px] mx-auto">
                 현재 운행 중인 7790번 차량이 차고지(협성대)에서 출발 대기 중이거나 회차 전입니다. 버스가 노선에 진입하면 AI 판별 분석 카드가 자동으로 생성됩니다.
               </p>
@@ -764,13 +813,13 @@
             const featuresHTML = bus.features.map(f => `
               <div class="space-y-1 text-xs">
                 <div class="flex justify-between items-center text-[11px]">
-                  <span class="font-bold text-gray-700">${f.name}</span>
+                  <span class="font-bold text-gray-700">${escapeHtml(f.name)}</span>
                   <span class="font-black ${isResv ? 'text-rose-600' : 'text-emerald-700'}">${f.weight}% 기여</span>
                 </div>
                 <div class="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
                   <div class="${isResv ? 'bg-rose-500' : 'bg-emerald-500'} h-1.5 rounded-full" style="width: ${f.weight}%"></div>
                 </div>
-                <p class="text-[10px] text-gray-400">${f.desc}</p>
+                <p class="text-[10px] text-gray-400">${escapeHtml(f.desc)}</p>
               </div>
             `).join("");
 
@@ -778,10 +827,10 @@
               <div class="p-3.5 sm:p-4 rounded-2xl border ${cardBorder} shadow-sm space-y-3 bg-white">
                 <div class="flex justify-between items-start">
                   <div class="min-w-0 flex-1 mr-2">
-                    <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">${bus.order}</span>
+                    <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">${escapeHtml(bus.order)}</span>
                     <div class="flex items-center space-x-1.5 mt-0.5 flex-wrap gap-y-1">
-                      <span class="text-base sm:text-lg font-black text-gray-900 whitespace-nowrap">${bus.shortPlate}</span>
-                      <span class="text-xs text-gray-500 font-bold whitespace-nowrap">(${bus.remainSeats}석 잔여)</span>
+                      <span class="text-base sm:text-lg font-black text-gray-900 whitespace-nowrap">${escapeHtml(bus.shortPlate)}</span>
+                      <span class="text-xs text-gray-500 font-bold whitespace-nowrap">(${escapeHtml(bus.remainSeats)}석 잔여)</span>
                       ${bus.isDoubleDecker ? '<span class="text-[9.5px] sm:text-[10px] bg-indigo-100 text-indigo-700 font-black px-1.5 sm:px-2 py-0.5 rounded-full border border-indigo-200 whitespace-nowrap">2층 버스 (71석)</span>' : '<span class="text-[9.5px] sm:text-[10px] bg-gray-100 text-gray-600 font-bold px-1.5 sm:px-2 py-0.5 rounded-full border border-gray-200 whitespace-nowrap">1층 버스 (45석)</span>'}
                     </div>
                   </div>
@@ -793,7 +842,7 @@
                 <!-- AI 설명 자연어 요약 -->
                 <div class="p-2.5 bg-gray-50 rounded-xl text-xs text-gray-700 border border-gray-100 flex items-start space-x-2">
                   <svg class="w-3.5 h-3.5 text-indigo-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  <span class="leading-relaxed font-medium">${bus.decisionText}</span>
+                  <span class="leading-relaxed font-medium">${escapeHtml(bus.decisionText)}</span>
                 </div>
 
                 <!-- AI 판단 주요 요인 -->
@@ -811,7 +860,7 @@
                     <span class="w-2 h-2 rounded-full flex-shrink-0 ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'bg-rose-500 animate-ping' : 'bg-indigo-600 animate-pulse'}"></span>
                     <span class="font-bold ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'text-rose-950' : 'text-indigo-900'} text-[10.5px] sm:text-[11px] truncate">AI 예상 착석 가능 좌석</span>
                   </div>
-                  <span class="font-black ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'text-rose-700' : 'text-indigo-700'} text-xs whitespace-nowrap flex-shrink-0">${bus.predictedSeatRange}</span>
+                  <span class="font-black ${(bus.predictedSeatRange.includes('만석') || bus.predictedSeatRange.startsWith('0석')) ? 'text-rose-700' : 'text-indigo-700'} text-xs whitespace-nowrap flex-shrink-0">${escapeHtml(bus.predictedSeatRange)}</span>
                 </div>
                 ` : ''}
 
@@ -875,6 +924,70 @@
               ${delayBarsHTML}
             </div>
           </div>
+
+          <!-- 3. 실시간 분석 및 전요일·전시간대 온라인 자동 학습 정보 (사당역 & 수원대 2대 탭) -->
+          <div class="p-4 bg-slate-900 text-white rounded-2xl shadow-sm space-y-3">
+            <div class="flex justify-between items-center">
+              <div class="flex items-center space-x-1.5 text-indigo-400 font-bold text-xs">
+                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                <span>7790 실시간 통학 지원 AI · 온라인 자동 학습</span>
+              </div>
+              <span class="text-[9.5px] sm:text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-bold whitespace-nowrap flex items-center">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span>전요일·전시간대 학습 중
+              </span>
+            </div>
+
+            <!-- 정류장별 온라인 학습 2대 탭 (사당역 vs 수원대) -->
+            <div class="grid grid-cols-2 p-0.5 bg-slate-800 rounded-lg border border-slate-700 text-xs gap-1">
+              <button type="button" id="mlTabBtnSadang" onclick="setMlTab('sadang')" class="py-1 px-2 rounded-md text-center font-bold transition-all ${window.currentMlTab === 'sadang' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}">
+                사당역
+              </button>
+              <button type="button" id="mlTabBtnSuwon" onclick="setMlTab('suwon')" class="py-1 px-2 rounded-md text-center font-bold transition-all ${window.currentMlTab === 'suwon' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}">
+                수원대
+              </button>
+            </div>
+
+            <!-- 1) 사당역 탭 콘텐츠 -->
+            <div id="mlTabContentSadang" class="${window.currentMlTab === 'sadang' ? '' : 'hidden'} p-2.5 bg-slate-800/80 rounded-xl border border-slate-700/70 space-y-1.5 text-[10.5px]">
+              <div class="flex justify-between items-center text-gray-300">
+                <span class="font-bold text-indigo-300">사당·상류 통과 버스 실측 역산 학습</span>
+                <span class="font-bold text-emerald-400 whitespace-nowrap">누적 ${sadangLearned}대 학습 (ML 반영률 ${mlWeight}%)</span>
+              </div>
+              ${lastSadang ? `
+              <div class="text-[10px] text-gray-400 flex items-center justify-between pt-1 border-t border-slate-700/60">
+                <span>최근 사당 통과 버스 실측 (${escapeHtml(lastSadang.plate)})</span>
+                <span class="text-amber-300 font-bold whitespace-nowrap">실제 ${lastSadang.boarded}명 탑승 · 잔여 ${lastSadang.remain}석</span>
+              </div>
+              ` : `
+              <div class="text-[10px] text-gray-400 pt-0.5">
+                사당역 통과 시 잔여석 변화량(45석-잔여석)을 실시간 감지해 요일·시간대별 가중치를 자동 갱신합니다.
+              </div>
+              `}
+            </div>
+
+            <!-- 2) 수원대 탭 콘텐츠 -->
+            <div id="mlTabContentSuwon" class="${window.currentMlTab === 'suwon' ? '' : 'hidden'} p-2.5 bg-slate-800/80 rounded-xl border border-slate-700/70 space-y-1.5 text-[10.5px]">
+              <div class="flex justify-between items-center text-gray-300">
+                <span class="font-bold text-indigo-300">수원대·상류 통과 버스 실측 역산 학습</span>
+                <span class="font-bold text-emerald-400 whitespace-nowrap">누적 ${upstreamLearned}대 학습 (ML 반영률 ${mlWeight}%)</span>
+              </div>
+              ${lastUpstream ? `
+              <div class="text-[10px] text-gray-400 flex items-center justify-between pt-1 border-t border-slate-700/60">
+                <span>최근 수원대 통과 버스 실측 (${escapeHtml(lastUpstream.plate)})</span>
+                <span class="text-amber-300 font-bold whitespace-nowrap">실제 ${lastUpstream.consumed}명 탑승 · 잔여 ${lastUpstream.remain}석</span>
+              </div>
+              ` : `
+              <div class="text-[10px] text-gray-400 pt-0.5">
+                수원대 통과 시 잔여석 변화량을 실시간 감지해 요일·시간대별 가중치를 자동 갱신합니다.
+              </div>
+              `}
+            </div>
+
+            <div class="pt-1.5 border-t border-slate-800 flex justify-between items-center text-[10px] text-gray-400">
+              <span>데이터: 경기도 버스 실시간 GPS · 학생 대기열 제보</span>
+              <span class="text-indigo-400 font-bold whitespace-nowrap">운행 중 ${totalActiveBuses}대 분석</span>
+            </div>
+          </div>
         `;
         if (refreshIcon) refreshIcon.classList.remove("animate-spin");
         const xaiUpdateTime = document.getElementById("xaiUpdateTime");
@@ -930,14 +1043,10 @@
           }
           const badge = document.getElementById("rushHourBadge");
           if (badge) {
-            if (crowd.isPeak || crowd.isAfternoonRush) {
-              badge.innerText = crowd.peakName || "피크 시간대";
+            if ((crowd.isPeak || crowd.isAfternoonRush) && crowd.peakName) {
+              badge.innerText = crowd.peakName;
               badge.classList.remove("hidden");
-              if (crowd.isFridayNight) {
-                badge.className = "text-[9.5px] sm:text-[10px] bg-rose-50 text-rose-700 font-bold px-2 py-0.5 rounded-full border border-rose-300 whitespace-nowrap flex-shrink-0";
-              } else {
-                badge.className = "text-[9.5px] sm:text-[10px] bg-amber-50 text-amber-800 font-bold px-2 py-0.5 rounded-full border border-amber-300 whitespace-nowrap flex-shrink-0";
-              }
+              badge.className = "text-[9.5px] sm:text-[10px] bg-amber-50 text-amber-800 font-bold px-2 py-0.5 rounded-full border border-amber-300 whitespace-nowrap flex-shrink-0";
             } else {
               badge.classList.add("hidden");
             }
@@ -995,12 +1104,12 @@
                               : (bus.probColor === 'amber'
                                 ? 'bg-amber-500'
                                 : 'bg-emerald-500')
-                          }"></span>예상 ${bus.predictedSeatRange}
+                          }"></span>예상 ${escapeHtml(bus.predictedSeatRange)}
                         </span>
                       ` : ''}
                     </div>
                     <div class="text-[10px] sm:text-[11px] text-gray-400 flex items-center space-x-1 sm:space-x-1.5 mt-0.5 flex-wrap gap-y-0.5">
-                      <span class="whitespace-nowrap">${bus.shortPlate} · 잔여 ${bus.remainSeats}석</span>
+                      <span class="whitespace-nowrap">${escapeHtml(bus.shortPlate)} · 잔여 ${escapeHtml(bus.remainSeats)}석</span>
                       ${bus.isDoubleDecker ? '<span class="px-1.5 py-0.2 bg-indigo-100 text-indigo-700 font-black rounded text-[9.5px] sm:text-[10px] whitespace-nowrap">2층 버스 (71석)</span>' : '<span class="px-1.5 py-0.2 bg-gray-100 text-gray-600 font-bold rounded text-[9.5px] sm:text-[10px] whitespace-nowrap">1층 버스</span>'}
                       ${is79Plate ? '<span class="px-1.5 py-0.2 bg-rose-100 text-rose-700 font-black rounded text-[9.5px] sm:text-[10px] whitespace-nowrap">전세면허(79)</span>' : ''}
                     </div>
@@ -1055,8 +1164,8 @@
 
               return `
                 <div class="flex items-center space-x-1 sm:space-x-1.5 border ${badgeBorder} px-1.5 sm:px-2 py-0.5 rounded-lg shadow-xs text-[11px] sm:text-xs font-bold whitespace-nowrap flex-shrink-0">
-                  <span class="text-gray-900 font-black">${v.shortPlate}</span>
-                  <span class="text-[10px] sm:text-[11px] text-gray-500">${v.remainSeats}석</span>
+                  <span class="text-gray-900 font-black">${escapeHtml(v.shortPlate)}</span>
+                  <span class="text-[10px] sm:text-[11px] text-gray-500">${escapeHtml(v.remainSeats)}석</span>
                   ${v.isDoubleDecker ? '<span class="text-[9px] bg-gray-200 text-gray-700 px-1 rounded font-black">2층</span>' : ''}
                   <span class="text-[9.5px] sm:text-[10px] font-black px-1.5 py-0.2 rounded-full ${tagBg}">${tagText}</span>
                 </div>
@@ -1077,7 +1186,7 @@
                 <div class="truncate mr-2">
                   <div class="flex items-center space-x-1">
                     <span class="text-xs ${isTarget ? 'text-blue-900 font-black text-sm' : isPass ? 'text-gray-400 font-normal' : 'text-gray-800 font-medium'} truncate">
-                      ${st.name}
+                      ${escapeHtml(st.name)}
                     </span>
                     ${isTurn ? '<span class="flex-shrink-0 text-[10px] font-black text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded shadow-xs">회차</span>' : ''}
                   </div>

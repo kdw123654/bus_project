@@ -5,6 +5,18 @@
       "mean": 21.5,
       "ewma": 22.85,
       "last_actual": 17
+    },
+    "4_42": {
+      "count": 2,
+      "mean": 45.5,
+      "ewma": 45.95,
+      "last_actual": 44
+    },
+    "4_43": {
+      "count": 1,
+      "mean": 27.0,
+      "ewma": 27.0,
+      "last_actual": 27
     }
   },
   "upstream_bucket_stats": {
@@ -35,51 +47,121 @@
       "last_remain": 66,
       "last_plate": "4547",
       "updated_at": "20:51"
+    },
+    "233002245_4_42": {
+      "count": 1,
+      "ewma_consumed": 2.0,
+      "last_remain": 69,
+      "last_plate": "4555",
+      "updated_at": "21:09"
+    },
+    "233002371_4_42": {
+      "count": 1,
+      "ewma_consumed": 6.0,
+      "last_remain": 65,
+      "last_plate": "4555",
+      "updated_at": "21:10"
+    },
+    "233002255_4_42": {
+      "count": 1,
+      "ewma_consumed": 18.0,
+      "last_remain": 53,
+      "last_plate": "4555",
+      "updated_at": "21:11"
+    },
+    "233003021_4_42": {
+      "count": 1,
+      "ewma_consumed": 18.0,
+      "last_remain": 53,
+      "last_plate": "4555",
+      "updated_at": "21:12"
+    },
+    "233002245_4_43": {
+      "count": 1,
+      "ewma_consumed": 6.0,
+      "last_remain": 65,
+      "last_plate": "4542",
+      "updated_at": "21:38"
+    },
+    "233002371_4_43": {
+      "count": 1,
+      "ewma_consumed": 9.0,
+      "last_remain": 62,
+      "last_plate": "4542",
+      "updated_at": "21:38"
+    },
+    "233002255_4_43": {
+      "count": 1,
+      "ewma_consumed": 21.0,
+      "last_remain": 50,
+      "last_plate": "4542",
+      "updated_at": "21:40"
+    },
+    "233003021_4_43": {
+      "count": 1,
+      "ewma_consumed": 21.0,
+      "last_remain": 50,
+      "last_plate": "4542",
+      "updated_at": "21:41"
     }
   },
   "weights": [
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
+    -0.0,
+    -0.0,
+    -0.0,
+    -0.0,
+    -0.0,
+    -0.0,
+    -0.0,
     2e-06,
-    0.001829,
-    0.045966,
-    0.062411,
-    0.001145,
-    3e-06,
-    -0.168236,
-    0.133992,
+    0.00218,
+    0.071948,
+    0.45283,
+    -0.012349,
+    -0.001151,
+    -0.575538,
+    0.538879,
     0.0,
     0.0,
     0.0,
-    0.215088,
+    0.786007,
     0.0,
     0.0,
-    0.0,
-    -0.013272,
-    0.215088
+    -0.323349,
+    0.500003,
+    0.372868
   ],
-  "bias": 0.107558,
-  "ewma_residual": 7.05,
-  "last_departure_epoch": 1792150852.3791773,
-  "total_learned_buses": 2,
-  "total_upstream_learned": 4,
-  "cumulative_abs_error": 14.0,
+  "bias": 0.393169,
+  "ewma_residual": 2.3928,
+  "last_departure_epoch": 1792154684.2236595,
+  "total_learned_buses": 5,
+  "total_upstream_learned": 3,
+  "upstream_learned_trips": [
+    "4542",
+    "4547",
+    "4555"
+  ],
+  "cumulative_abs_error": 90.0,
   "within_3_count": 1,
-  "eval_count": 2,
-  "last_updated_str": "2026-10-16 20:40:52",
+  "eval_count": 5,
+  "last_updated_str": "2026-10-16 21:44:44",
   "last_bus_event": {
-    "plate": "4543",
-    "actualBoarded": 17,
-    "remainSeats": 54,
+    "plate": "4547",
+    "actualBoarded": 27,
+    "remainSeats": 44,
     "isDoubleDecker": true,
-    "headwayGapMin": 7.5,
-    "timeStr": "20:40",
+    "headwayGapMin": 20.1,
+    "timeStr": "21:44",
     "weekday": 4,
-    "timestamp": 1792150852.3791773
+    "timestamp": 1792154684.2236595
+  },
+  "last_upstream_bus_event": {
+    "stationId": "233003021",
+    "stationName": "수원대입구",
+    "plate": "4542",
+    "consumed": 21,
+    "remain": 50,
+    "isDoubleDecker": true,
+    "timeStr": "21:41"
   }
 }

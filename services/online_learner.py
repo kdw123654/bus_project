@@ -4,7 +4,7 @@ import math
 import time
 import threading
 import datetime
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, Dict, Any, Tuple, List, Set
 
 # 선택적 고성능 ML 라이브러리 로드 (미설치 환경에서도 순수 파이썬 온라인 SGD/Ridge 엔진으로 100% 무중단 동작)
 try:
@@ -89,12 +89,14 @@ class SadangOnlineLearner:
 
         # 4. 실시간 모멘텀 (가장 최근 사당역을 출발한 버스의 실측 탑승 정보 및 예측 오차)
         self.last_bus_event: Optional[Dict[str, Any]] = None
+        self.last_upstream_bus_event: Optional[Dict[str, Any]] = None
         self.ewma_residual: float = 0.0
         self.last_departure_epoch: float = 0.0
 
         # 5. 모델 메타데이터 및 정확도 추적 (MAE, 적중률)
         self.total_learned_buses: int = 0
         self.total_upstream_learned: int = 0
+        self.upstream_learned_trips: Set[str] = set()
         self.cumulative_abs_error: float = 0.0
         self.within_3_count: int = 0
         self.eval_count: int = 0
@@ -292,7 +294,25 @@ class SadangOnlineLearner:
                 "last_plate": plate,
                 "updated_at": now_dt.strftime("%H:%M")
             }
-            self.total_upstream_learned += 1
+            trip_key = f"{plate}_{now_dt.strftime('%Y%m%d%H')}"
+            if trip_key not in self.upstream_learned_trips:
+                self.upstream_learned_trips.add(trip_key)
+                self.total_upstream_learned += 1
+            st_names = {
+                "233002245": "효행초",
+                "233002371": "아이파크",
+                "233002255": "신명아파트",
+                "233003021": "수원대입구"
+            }
+            self.last_upstream_bus_event = {
+                "stationId": station_id,
+                "stationName": st_names.get(station_id, "수원대·봉담"),
+                "plate": plate,
+                "consumed": consumed_seats,
+                "remain": remain_seats,
+                "isDoubleDecker": is_double_decker,
+                "timeStr": now_dt.strftime("%H:%M")
+            }
             self.save_state()
 
     def _predict_internal(
@@ -429,6 +449,16 @@ class SadangOnlineLearner:
                 "remain": self.last_bus_event.get("remainSeats", 0),
                 "timeStr": self.last_bus_event.get("timeStr", "")
             }
+        last_up_rec = None
+        if self.last_upstream_bus_event:
+            last_up_rec = {
+                "stationId": self.last_upstream_bus_event.get("stationId", ""),
+                "stationName": self.last_upstream_bus_event.get("stationName", "수원대·봉담"),
+                "plate": self.last_upstream_bus_event.get("plate", ""),
+                "consumed": self.last_upstream_bus_event.get("consumed", 0),
+                "remain": self.last_upstream_bus_event.get("remain", 0),
+                "timeStr": self.last_upstream_bus_event.get("timeStr", "")
+            }
         return {
             "mode": "전요일·전시간대 실시간 온라인 학습 (Online SGD + Empirical Bayes)",
             "engine": "Online Incremental SGD + Empirical Bayes Hybrid",
@@ -444,7 +474,9 @@ class SadangOnlineLearner:
             "within4SeatsAccuracy": hit_rate,
             "lastUpdated": self.last_updated_str,
             "lastBusEvent": self.last_bus_event,
-            "lastSadangRecord": last_rec
+            "lastSadangRecord": last_rec,
+            "lastUpstreamBusEvent": self.last_upstream_bus_event,
+            "lastUpstreamRecord": last_up_rec
         }
 
     def save_state(self):
@@ -459,11 +491,13 @@ class SadangOnlineLearner:
                 "last_departure_epoch": self.last_departure_epoch,
                 "total_learned_buses": self.total_learned_buses,
                 "total_upstream_learned": self.total_upstream_learned,
+                "upstream_learned_trips": list(self.upstream_learned_trips)[-500:],
                 "cumulative_abs_error": round(self.cumulative_abs_error, 4),
                 "within_3_count": self.within_3_count,
                 "eval_count": self.eval_count,
                 "last_updated_str": self.last_updated_str,
-                "last_bus_event": self.last_bus_event
+                "last_bus_event": self.last_bus_event,
+                "last_upstream_bus_event": self.last_upstream_bus_event
             }
             tmp_file = MODEL_STATE_FILE + ".tmp"
             with open(tmp_file, "w", encoding="utf-8") as f:
@@ -488,12 +522,52 @@ class SadangOnlineLearner:
             self.ewma_residual = float(state.get("ewma_residual", 0.0))
             self.last_departure_epoch = float(state.get("last_departure_epoch", 0.0))
             self.total_learned_buses = int(state.get("total_learned_buses", 0))
-            self.total_upstream_learned = int(state.get("total_upstream_learned", 0))
+            self.upstream_learned_trips = set(state.get("upstream_learned_trips", []))
+            
+            # 상행 고유 실측 차량 대수 보정 (중복 정류장 이벤트 누적 방지)
+            up_csv = os.path.join(DATA_DIR, "upstream_telemetry.csv")
+            if os.path.exists(up_csv):
+                try:
+                    with open(up_csv, "r", encoding="utf-8-sig") as f_up:
+                        lines = [line.strip().split(",") for line in f_up if line.strip()]
+                        if len(lines) > 1:
+                            unique_plates = set(row[6] for row in lines[1:] if len(row) > 6 and row[6])
+                            self.total_upstream_learned = len(unique_plates)
+                            for p in unique_plates:
+                                self.upstream_learned_trips.add(p)
+                except Exception:
+                    self.total_upstream_learned = len(self.upstream_learned_trips) if self.upstream_learned_trips else int(state.get("total_upstream_learned", 0))
+            else:
+                self.total_upstream_learned = len(self.upstream_learned_trips) if self.upstream_learned_trips else int(state.get("total_upstream_learned", 0))
+
             self.cumulative_abs_error = float(state.get("cumulative_abs_error", 0.0))
             self.within_3_count = int(state.get("within_3_count", 0))
             self.eval_count = int(state.get("eval_count", 0))
             self.last_updated_str = state.get("last_updated_str", "복원 완료")
             self.last_bus_event = state.get("last_bus_event", None)
+            self.last_upstream_bus_event = state.get("last_upstream_bus_event", None)
+            if not self.last_upstream_bus_event and self.upstream_bucket_stats:
+                st_map = {
+                    "233002245": "효행초",
+                    "233002371": "아이파크",
+                    "233002255": "신명아파트",
+                    "233003021": "수원대입구"
+                }
+                latest_key, latest_val = None, None
+                for k, v in self.upstream_bucket_stats.items():
+                    if not latest_val or v.get("updated_at", "") >= latest_val.get("updated_at", ""):
+                        latest_key, latest_val = k, v
+                if latest_val:
+                    st_id = latest_key.split("_")[0]
+                    self.last_upstream_bus_event = {
+                        "stationId": st_id,
+                        "stationName": st_map.get(st_id, "수원대·봉담"),
+                        "plate": latest_val.get("last_plate", ""),
+                        "consumed": int(round(latest_val.get("ewma_consumed", 0))),
+                        "remain": latest_val.get("last_remain", 0),
+                        "isDoubleDecker": False,
+                        "timeStr": latest_val.get("updated_at", "")
+                    }
             print(
                 f"[OK] 실시간 온라인 학습 모델 복원 완료! "
                 f"(사당역 {self.total_learned_buses}대 / 상행 {self.total_upstream_learned}대 누적 학습)"

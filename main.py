@@ -13,6 +13,29 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from core.config import (
+    API_KEY,
+    KST,
+    get_kst_now,
+    STATION_ID,
+    ROUTE_REGULAR_ID,
+    ROUTE_RESERVE_ID,
+    BUS_CACHE_TTL,
+    XAI_CACHE_TTL,
+    TRAFFIC_CACHE_TTL,
+    WEATHER_CACHE_TTL,
+    GBIS_ROUTE_CACHE_TTL,
+    GBIS_HEADERS,
+    STATION_XAI_PROFILES,
+    UPSTREAM_STATION_CHAIN,
+    TIMETABLE_INFO
+)
+from services.gbis_client import (
+    is_charter_or_reserved_bus,
+    fetch_gbis_route_cached,
+    fetch_full_route_stations,
+    calc_realtime_traffic_delays
+)
 from services.online_learner import online_learner, is_friday_night_window
 from services.telemetry_logger import process_live_vehicles_for_learning
 
@@ -21,20 +44,6 @@ FILE_IO_LOCK = threading.Lock()
 
 # GBIS 등 공공 SSL 인증서 자체서명 경고 콘솔 노이즈 억제
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-load_dotenv()
-API_KEY = os.getenv("BUS_API_KEY")
-
-# 대한민국 표준시(KST, UTC+9) 보증 헬퍼 (서버 타임존이 UTC인 클라우드/도커 환경에서도 항상 KST 기준 동작)
-KST = datetime.timezone(datetime.timedelta(hours=9))
-
-def get_kst_now():
-    """항상 대한민국 표준시(KST, UTC+9) 기준의 datetime 객체를 반환합니다."""
-    return datetime.datetime.now(KST)
-
-STATION_ID = "119000302"         # 사당역 9번 출구 앞 (승차)
-ROUTE_REGULAR_ID = "200000149"    # 일반 7790
-ROUTE_RESERVE_ID = "233000384"    # 7790 (예약/전세)
 
 _bg_learning_started = False
 
@@ -72,9 +81,6 @@ CACHED_STATIONS = []
 import time
 CACHE_BUS_ARRIVALS = {}      # {station_id: {"data": dict, "timestamp": float}}
 CACHE_XAI_ANALYSIS = {}      # {station_id: {"data": dict, "timestamp": float}}
-CACHE_TRAFFIC_DELAYS = {}    # {direction: {"data": list, "timestamp": float}}
-CACHE_WEATHER = {"data": None, "timestamp": 0.0}
-CACHE_GBIS_ROUTE = {"data": None, "timestamp": 0.0}   # GBIS 노선/차량/소요시간 단일 통합 인메모리 캐시
 CROWD_REPORT_IP_RATE_LIMIT = {}  # {ip: [timestamps]} - 캠퍼스 Wi-Fi 분당 도배 방지
 
 # ⭐ 불감대(Deadband) 기반 좌석 예측 앵커링(Lock-in) 레지스트리
@@ -82,12 +88,6 @@ CROWD_REPORT_IP_RATE_LIMIT = {}  # {ip: [timestamps]} - 캠퍼스 Wi-Fi 분당 �
 # 숫자가 11석 -> 9석 -> 12석처럼 널뛰지(Jitter) 않도록 초기 예측값을 안정적으로 고정 유지합니다.
 # 만약 단체 승차 등으로 허용 오차 범위를 유의미하게 벗어나면(Out-of-bound) 즉시 새 기준으로 갱신(Re-anchor)합니다.
 PREDICTION_LOCK_REGISTRY = {}  # {f"{station_id}_{plate}": dict}
-
-BUS_CACHE_TTL = 6.0          # 6초 캐시: 동시 접속자가 100명이어도 외부 API는 6초에 1번만 호출
-XAI_CACHE_TTL = 5.0          # 5초 XAI 분석 캐시
-TRAFFIC_CACHE_TTL = 12.0     # 12초 캐시
-WEATHER_CACHE_TTL = 300.0    # 5분 캐시
-GBIS_ROUTE_CACHE_TTL = 8.0   # 8초 GBIS 실시간 데이터 공유 캐시 (도착/차량/소요시간 중복 요청 방어)
 
 def apply_prediction_deadband_lock(
     station_id: str,
@@ -122,10 +122,12 @@ def apply_prediction_deadband_lock(
         PREDICTION_LOCK_REGISTRY.pop(lock_key, None)
         return new_expected, new_lower, new_upper, new_range, new_prob, new_status, new_color, new_decision
 
+    # ⭐ [메모리 누수 방어] 20분(1200초) 이상 경과한 오래된 레코드 즉시 회수(eviction)
+    expired_keys = [k for k, v in list(PREDICTION_LOCK_REGISTRY.items()) if now - v.get("timestamp", 0) > 1200]
+    for k in expired_keys:
+        PREDICTION_LOCK_REGISTRY.pop(k, None)
+
     record = PREDICTION_LOCK_REGISTRY.get(lock_key)
-    # 20분 이상 경과한 오래된 레코드는 만료 처리
-    if record and (now - record["timestamp"] > 1200):
-        record = None
 
     if record:
         locked_low = record["lower_bound"]
@@ -164,35 +166,6 @@ def apply_prediction_deadband_lock(
     return new_expected, new_lower, new_upper, new_range, new_prob, new_status, new_color, new_decision
 
 
-# 💡 GBIS 및 공공기관 방화벽(WAF) 차단 방지를 위한 브라우저 User-Agent
-GBIS_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-}
-
-def fetch_gbis_route_cached(force_refresh=False):
-    """
-    GBIS searchRouteJson 엔드포인트를 8초 인메모리 캐싱하여
-    도착 버스 조회와 실시간 도로교통 지연 분석(SHAP) 간의 중복 네트워크 I/O를 원천 차단합니다.
-    """
-    global CACHE_GBIS_ROUTE
-    now = time.time()
-    if not force_refresh and CACHE_GBIS_ROUTE["data"] and (now - CACHE_GBIS_ROUTE["timestamp"] < GBIS_ROUTE_CACHE_TTL):
-        return CACHE_GBIS_ROUTE["data"]
-
-    url_route = "https://www.gbis.go.kr/gbis2014/schBusAPI.action"
-    data_route = {"cmd": "searchRouteJson", "routeId": ROUTE_REGULAR_ID}
-    try:
-        r_live = requests.post(url_route, data=data_route, headers=GBIS_HEADERS, timeout=5, verify=False)
-        if r_live.status_code == 200:
-            res = r_live.json()
-            CACHE_GBIS_ROUTE = {"data": res, "timestamp": now}
-            return res
-    except Exception as e:
-        print(f"GBIS 노선 통합 캐시 조회 오류: {e}")
-
-    return CACHE_GBIS_ROUTE["data"] or {}
-
-
 def get_real_client_ip(request: Request) -> str:
     """리버스 프록시(Nginx, Cloudflare, AWS, Render, ngrok 등) 환경에서 실제 클라이언트 IP 추출"""
     forwarded = request.headers.get("x-forwarded-for")
@@ -202,99 +175,6 @@ def get_real_client_ip(request: Request) -> str:
     if real_ip:
         return real_ip.strip()
     return request.client.host if request.client else "unknown"
-
-
-def is_charter_or_reserved_bus(
-    route_id: str = "",
-    route_name: str = "",
-    plate_no: str = "",
-    short_plate: str = "",
-    reservation_flag: str = ""
-) -> tuple[bool, str]:
-    """
-    7790번 운행 차량이 일반 정규 광역버스(탑승 가능)인지,
-    외부 임차 전세/예약버스(경기 79사/바/아/자, 9000번대 등 일반 학생 탑승 불가)인지 정밀 식별합니다.
-
-    [면허 체계 기준]:
-    - 경진여객 정규 노선 면허: 경기 70사(수원시), 경기 76아(화성시)
-    - 외부 임차 전세버스 면허: 경기 79사, 경기 79바, 경기 79아, 경기 79자 (및 경기 78사/바/아/자 등 전세버스조합 면허)
-    - 예약버스 식별 번호: 차량 뒤 4자리가 9000번대(9XXX)로 임시 배정된 차량
-    - GBIS/공공데이터 플래그: ROUTE_RESERVE_ID('233000384'), '예약' 노선명, reservation == 'Y'
-    """
-    clean_plate = (plate_no or "").replace(" ", "")
-    clean_short = (short_plate or "").replace(" ", "")
-    if not clean_short and clean_plate:
-        clean_short = clean_plate[-4:] if len(clean_plate) >= 4 else clean_plate
-
-    # 1. 공공데이터/GBIS 공식 예약 노선 ID 또는 명칭에 '예약'이 명시된 경우
-    if str(route_id) == ROUTE_RESERVE_ID or ("예약" in str(route_name)):
-        return True, "GBIS 공공데이터 예약 노선(233000384)으로 지정됨"
-
-    # 2. GBIS 실시간 차량 reservation 플래그
-    if str(reservation_flag).upper() == "Y":
-        return True, "GBIS 실시간 차량 예약(Reservation) 플래그 식별됨"
-
-    # 3. ⭐ 경기도 전세버스 전용 면허 식별 (경기 79사, 경기 79바, 경기 79아, 경기 79자 등)
-    # 경진여객 정규 면허(경기 70사 수원 / 경기 76아 화성) 외의 전세버스 면허인 경우 100% 임차 전세차량
-    charter_plate_markers = ["경기79", "79사", "79바", "79아", "79자", "경기78", "78사", "78바", "78아", "78자"]
-    for marker in charter_plate_markers:
-        if marker in clean_plate:
-            return True, f"전세버스 면허('{marker}'): 외부 임차 전세 차량으로 식별됨 (정규 70사/76아 외 면허)"
-
-    # 서울 등 타 지자체 전세버스(서울 70사/바 등) 임차 차량 검사
-    if any(m in clean_plate for m in ["서울70사", "서울70바", "서울70아", "서울70자"]):
-        return True, f"외부 전세버스 면허('{clean_plate}'): 타 시도 임차 전세 차량"
-
-    # 4. 차량 번호 뒤 4자리가 9000번대인 경우 (출퇴근 전세버스 임시 식별 번호 대역)
-    if clean_short.startswith("9"):
-        return True, f"차량번호 '{clean_short}': 9000번대 외부 임차 전세버스 식별 번호"
-
-    return False, "정규 광역버스 면허 (경기 70사 수원 / 경기 76아 화성)"
-
-
-def fetch_full_route_stations():
-    """GBIS에서 7790 전 노선 66개 정류장 수집"""
-    try:
-        res = fetch_gbis_route_cached(force_refresh=True)
-        up_list = res.get("result", {}).get("gg", {}).get("up", {}).get("list", [])
-        down_list = res.get("result", {}).get("gg", {}).get("down", {}).get("list", [])
-
-        stations = []
-        for s in up_list:
-            name = s.get("stationNm", "")
-            is_pass = "(경유)" in name or "(미정차)" in name
-            clean_name = name.replace("(경유)", "").replace("(미정차)", "")
-            stations.append({
-                "seq": int(s.get("stationSeq", 0)),
-                "id": str(s.get("stationId")),
-                "name": clean_name,
-                "rawName": name,
-                "isPass": is_pass,
-                "dir": "UP",
-                "isTurn": (name == "사당역(중)"),
-                "isTarget": False
-            })
-
-        for s in down_list:
-            name = s.get("stationNm", "")
-            is_pass = "(경유)" in name or "(미정차)" in name
-            clean_name = name.replace("(경유)", "").replace("(미정차)", "")
-            stations.append({
-                "seq": int(s.get("stationSeq", 0)),
-                "id": str(s.get("stationId")),
-                "name": clean_name,
-                "rawName": name,
-                "isPass": is_pass,
-                "dir": "DOWN",
-                "isTurn": False,
-                "isTarget": (name == "사당역9번출구앞")
-            })
-
-        print(f"[OK] 7790 전 노선 {len(stations)}개 정류장 로드 완료!")
-        return stations
-    except Exception as e:
-        print(f"[ERROR] 정류소 목록 로드 실패: {e}")
-        return []
 
 
 
@@ -597,24 +477,29 @@ def _background_telemetry_learning_loop():
 CROWD_DATA_FILE = "crowd_reports_cache.json"
 CROWD_REPORTS_BY_STATION = {}
 CROWD_REPORT_IP_COOLDOWN = {}  # {ip: timestamp}
+CROWD_STATE_LOCK = threading.Lock()
 
 def save_crowd_data_to_disk():
+    """원자적(Atomic) 파일 쓰기로 제보 데이터 디스크 보존 (데이터 손상 원천 방지)"""
     try:
         now = time.time()
-        clean_reports = {}
-        for st_id, r_list in CROWD_REPORTS_BY_STATION.items():
-            valid = [r for r in r_list if now - r["time"] < 600]
-            if valid:
-                clean_reports[st_id] = valid
-        clean_ips = {}
-        for ip, record in CROWD_REPORT_IP_COOLDOWN.items():
-            t = record.get("time", 0) if isinstance(record, dict) else record
-            dur = record.get("duration", 600) if isinstance(record, dict) else 600
-            if now - t < dur:
-                clean_ips[ip] = record
+        with CROWD_STATE_LOCK:
+            clean_reports = {}
+            for st_id, r_list in CROWD_REPORTS_BY_STATION.items():
+                valid = [r for r in r_list if now - r["time"] < 600]
+                if valid:
+                    clean_reports[st_id] = valid
+            clean_ips = {}
+            for ip, record in CROWD_REPORT_IP_COOLDOWN.items():
+                t = record.get("time", 0) if isinstance(record, dict) else record
+                dur = record.get("duration", 600) if isinstance(record, dict) else 600
+                if now - t < dur:
+                    clean_ips[ip] = record
         with FILE_IO_LOCK:
-            with open(CROWD_DATA_FILE, "w", encoding="utf-8") as f:
-                json.dump({"reports": clean_reports, "ips": clean_ips}, f)
+            tmp_file = CROWD_DATA_FILE + ".tmp"
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump({"reports": clean_reports, "ips": clean_ips}, f, ensure_ascii=False)
+            os.replace(tmp_file, CROWD_DATA_FILE)
     except Exception as e:
         print(f"제보 데이터 디스크 저장 오류: {e}")
 
@@ -632,14 +517,15 @@ def load_crowd_data_from_disk():
             valid = [r for r in r_list if now - r["time"] < 600]
             if valid:
                 clean_reports[st_id] = valid
-        CROWD_REPORTS_BY_STATION = clean_reports
         clean_ips = {}
         for ip, record in data.get("ips", {}).items():
             t = record.get("time", 0) if isinstance(record, dict) else record
             dur = record.get("duration", 600) if isinstance(record, dict) else 600
             if now - t < dur:
                 clean_ips[ip] = record
-        CROWD_REPORT_IP_COOLDOWN = clean_ips
+        with CROWD_STATE_LOCK:
+            CROWD_REPORTS_BY_STATION = clean_reports
+            CROWD_REPORT_IP_COOLDOWN = clean_ips
         print(f"[OK] 제보 데이터 {sum(len(v) for v in clean_reports.values())}건 디스크 복원 완료!")
     except Exception as e:
         print(f"제보 데이터 디스크 복원 오류: {e}")
@@ -685,56 +571,62 @@ def report_crowd(
     user_id = client_uuid if client_uuid else client_ip
     cooldown_key = f"{user_id}_{station_id}"
 
-    # 2-1. 공인 IP 기준 분당 총량 제한 (스크립트/도배 방어, 캠퍼스 Wi-Fi 고려 분당 최대 8건)
-    ip_history = CROWD_REPORT_IP_RATE_LIMIT.get(client_ip, [])
-    ip_history = [t for t in ip_history if now - t < 60]
-    if len(ip_history) >= 8:
-        return {
-            "success": False,
-            "message": "교내 네트워크에서 일시적으로 제보가 집중되었습니다. 1분 후 다시 시도해 주세요.",
-            "remainCooldown": 30,
-            "stationId": station_id
-        }
+    with CROWD_STATE_LOCK:
+        # ⭐ [메모리 누수 방어] 60초 이상 경과한 IP 항목 및 빈 히스토리 즉시 회수(eviction)
+        expired_ips = [ip for ip, hist in list(CROWD_REPORT_IP_RATE_LIMIT.items()) if not hist or (now - hist[-1] >= 60)]
+        for ip in expired_ips:
+            CROWD_REPORT_IP_RATE_LIMIT.pop(ip, None)
 
-    # 2-2. 개인별(UUID/기기) 정류장 쿨다운 검사
-    last_record = CROWD_REPORT_IP_COOLDOWN.get(cooldown_key)
-    if isinstance(last_record, dict):
-        last_time = last_record.get("time", 0)
-        cooldown_duration = last_record.get("duration", 300)
-    elif isinstance(last_record, (int, float)):
-        last_time = last_record
-        cooldown_duration = 300
-    else:
-        last_time = 0
-        cooldown_duration = 300
+        # 2-1. 공인 IP 기준 분당 총량 제한 (스크립트/도배 방어, 캠퍼스 Wi-Fi 고려 분당 최대 8건)
+        ip_history = CROWD_REPORT_IP_RATE_LIMIT.get(client_ip, [])
+        ip_history = [t for t in ip_history if now - t < 60]
+        if len(ip_history) >= 8:
+            return {
+                "success": False,
+                "message": "교내 네트워크에서 일시적으로 제보가 집중되었습니다. 1분 후 다시 시도해 주세요.",
+                "remainCooldown": 30,
+                "stationId": station_id
+            }
 
-    remain = int(cooldown_duration - (now - last_time))
-    if remain > 0:
-        remain_min = remain // 60
-        remain_sec = remain % 60
-        time_msg = f"{remain_min}분 {remain_sec}초" if remain_min > 0 else f"{remain_sec}초"
-        return {
-            "success": False,
-            "message": f"도배 방지 및 도착 주기 연동으로 {time_msg} 후 다시 제보 가능합니다.",
-            "remainCooldown": remain,
-            "stationId": station_id
-        }
+        # 2-2. 개인별(UUID/기기) 정류장 쿨다운 검사
+        last_record = CROWD_REPORT_IP_COOLDOWN.get(cooldown_key)
+        if isinstance(last_record, dict):
+            last_time = last_record.get("time", 0)
+            cooldown_duration = last_record.get("duration", 300)
+        elif isinstance(last_record, (int, float)):
+            last_time = last_record
+            cooldown_duration = 300
+        else:
+            last_time = 0
+            cooldown_duration = 300
 
-    ip_history.append(now)
-    CROWD_REPORT_IP_RATE_LIMIT[client_ip] = ip_history
+        remain = int(cooldown_duration - (now - last_time))
+        if remain > 0:
+            remain_min = remain // 60
+            remain_sec = remain % 60
+            time_msg = f"{remain_min}분 {remain_sec}초" if remain_min > 0 else f"{remain_sec}초"
+            return {
+                "success": False,
+                "message": f"도배 방지 및 도착 주기 연동으로 {time_msg} 후 다시 제보 가능합니다.",
+                "remainCooldown": remain,
+                "stationId": station_id
+            }
 
-    if station_id not in CROWD_REPORTS_BY_STATION:
-        CROWD_REPORTS_BY_STATION[station_id] = []
+        ip_history.append(now)
+        CROWD_REPORT_IP_RATE_LIMIT[client_ip] = ip_history
 
-    # 최근 10분(600초) 제보 보존 (최대 10분 락 및 점진 감쇄 지원)
-    CROWD_REPORTS_BY_STATION[station_id] = [r for r in CROWD_REPORTS_BY_STATION[station_id] if now - r["time"] < 600]
-    CROWD_REPORTS_BY_STATION[station_id].append({
-        "status": status,
-        "time": now,
-        "targetPlate": target_bus_plate,
-        "targetEta": target_eta_min
-    })
-    CROWD_REPORT_IP_COOLDOWN[cooldown_key] = {"time": now, "duration": dynamic_cooldown}
+        if station_id not in CROWD_REPORTS_BY_STATION:
+            CROWD_REPORTS_BY_STATION[station_id] = []
+
+        # 최근 10분(600초) 제보 보존 (최대 10분 락 및 점진 감쇄 지원)
+        CROWD_REPORTS_BY_STATION[station_id] = [r for r in CROWD_REPORTS_BY_STATION[station_id] if now - r["time"] < 600]
+        CROWD_REPORTS_BY_STATION[station_id].append({
+            "status": status,
+            "time": now,
+            "targetPlate": target_bus_plate,
+            "targetEta": target_eta_min
+        })
+        CROWD_REPORT_IP_COOLDOWN[cooldown_key] = {"time": now, "duration": dynamic_cooldown}
 
     # ⭐ 디스크 영구 저장 (서버 재부팅/재배포 시에도 제보 보존)
     save_crowd_data_to_disk()
@@ -758,7 +650,8 @@ def get_crowd_summary(station_id="119000302"):
     """최근 제보 요약 및 버스 미도착 시 대기열 락(Lock) & 점진 감쇄(Decay) 분석"""
     import time, datetime
     now = time.time()
-    reports = CROWD_REPORTS_BY_STATION.get(station_id, [])
+    with CROWD_STATE_LOCK:
+        reports = list(CROWD_REPORTS_BY_STATION.get(station_id, []))
 
     # 1. 5분(300초) 이내 신선한 제보
     fresh_reports = [r for r in reports if now - r["time"] < 300]
@@ -827,13 +720,11 @@ def get_crowd_summary(station_id="119000302"):
         is_morning_peak = (weekday < 5) and (7.5 <= time_float <= (10.0 + 10.0/60.0))
         is_evening_peak = (weekday < 5) and (16.5 <= time_float <= 19.5)
         is_friday_night = is_friday_night_window(weekday, time_float)
-        is_peak = is_morning_peak or is_evening_peak or is_friday_night
+        is_peak = is_morning_peak or is_evening_peak
         if is_morning_peak:
             peak_name = "등교 피크 (07:30~10:10)"
         elif is_evening_peak:
             peak_name = "퇴근 피크 (16:30~19:30)"
-        elif is_friday_night:
-            peak_name = "🔥 불금 심야 피크 (21:30~00:30)"
         else:
             peak_name = ""
     else:
@@ -898,7 +789,7 @@ def get_crowd_summary(station_id="119000302"):
             "peakName": peak_name,
             "isMorningRush": (is_peak and is_down and is_morning_peak),
             "isEveningRush": (is_peak and is_down and is_evening_peak),
-            "isFridayNight": (is_peak and is_down and is_friday_night),
+            "isFridayNight": (is_down and is_friday_night),
             "isAfternoonRush": (is_peak and not is_down),
             "isSticky": is_sticky,
             "stickyDecayFactor": sticky_decay_factor
@@ -923,7 +814,7 @@ def get_crowd_summary(station_id="119000302"):
             "peakName": peak_name,
             "isMorningRush": (is_peak and is_down and is_morning_peak),
             "isEveningRush": (is_peak and is_down and is_evening_peak),
-            "isFridayNight": (is_peak and is_down and is_friday_night),
+            "isFridayNight": (is_down and is_friday_night),
             "isAfternoonRush": (is_peak and not is_down),
             "isSticky": False,
             "stickyDecayFactor": 1.0
@@ -938,11 +829,11 @@ def estimate_sadang_waiters_by_time(apply_online_ml: bool = True, is_double_deck
     weekday = now_dt.weekday()  # 0:월, 1:화, ..., 4:금, 5:토, 6:일
     time_float = hour + minute / 60.0
 
-    # 🔥 0. 금요일 밤이 자정을 넘어 토요일 새벽(00:00 ~ 00:40)이 된 경우: 불금 00:30 막차 대란 연속 처리
+    # 0. 금요일 밤이 자정을 넘어 토요일 새벽(00:00 ~ 00:40)이 된 경우: 00:30 막차 귀가 처리
     if weekday == 5 and time_float <= 0.67:
         base = 55
         est = int(round(base * 1.15))  # 약 63명 (1층 만석 초과, 2층 경합)
-        desc = "불금 사당역 00:30 막차 대란 (초과 만석 위험·서울 모임 마감 및 지하철 환승 집중)"
+        desc = "사당역 00:30 막차 귀가 시간대 (지하철 환승 및 귀가객 집중)"
         if apply_online_ml:
             est, desc, _ = online_learner.predict_sadang_waiters(now_dt, est, desc, is_double_decker=is_double_decker)
         return est, desc
@@ -1026,21 +917,21 @@ def estimate_sadang_waiters_by_time(apply_online_ml: bool = True, is_double_deck
     elif 21.5 <= time_float < 22.5:  # 21:30 ~ 22:30 (불금 1차 귀가 급증 vs 평일 야간)
         if weekday == 4:
             base = 38
-            desc = "🔥 불금 야간 1차 귀가 급증 (서울 모임·회식 귀가객 집중)"
+            desc = "야간 귀가 시간대 (서울 모임 귀가객 포함)"
         else:
             base = 12
             desc = "평일 야간 귀가 시간대 (일반 승객 포함)"
-    elif 22.5 <= time_float < 23.75:  # 22:30 ~ 23:45 (불금 심야 귀가 극피크 vs 평일 심야)
+    elif 22.5 <= time_float < 23.75:  # 22:30 ~ 23:45
         if weekday == 4:
             base = 48
-            desc = "🔥 불금 심야 귀가 극피크 (서울 모임 종료·대기열 장사진)"
+            desc = "심야 귀가 시간대 (귀가객 및 비사용자 포함)"
         else:
             base = 15
             desc = "평일 심야 귀가 시간대 (일반 승객 포함)"
-    elif 23.75 <= time_float <= 24.0:  # 23:45 ~ 24:00 (막차 직전 대란)
+    elif 23.75 <= time_float <= 24.0:  # 23:45 ~ 24:00
         if weekday == 4:
             base = 55
-            desc = "🔥 불금 사당역 00:30 막차 대란 (초과 만석 위험·지하철 환승 집중)"
+            desc = "사당역 00:30 막차 귀가 시간대 (지하철 환승 및 귀가객 집중)"
         else:
             base = 25
             desc = "사당역 00:30 막차 귀가 시간대 (비사용자 집중)"
@@ -1053,164 +944,6 @@ def estimate_sadang_waiters_by_time(apply_online_ml: bool = True, is_double_deck
         est, desc, _ = online_learner.predict_sadang_waiters(now_dt, est, desc, is_double_decker=is_double_decker)
     return est, desc
 
-# ⭐ 실시간 GBIS 도로교통 소통시간 및 실시간 기상/노면 데이터 연동 함수
-def calc_realtime_traffic_delays(direction="UP"):
-    """
-    GBIS 7790번 66개 구간별 실시간 통과 소요시간(ptts)과 실시간 날씨를 연동하여
-    SHAP 지연 기여 요인을 실시간으로 산출합니다 (12초 인메모리 캐싱 적용).
-    """
-    global CACHE_TRAFFIC_DELAYS, CACHE_WEATHER
-    now = time.time()
-    cached = CACHE_TRAFFIC_DELAYS.get(direction)
-    if cached and (now - cached["timestamp"] < TRAFFIC_CACHE_TTL):
-        return cached["data"]
-
-    try:
-        res = fetch_gbis_route_cached()
-        est = res.get("result", {}).get("estimateTime", [])
-    except Exception:
-        est = []
-
-    order_ptts = {}
-    for item in est:
-        try:
-            order = int(item.get("staOrder", 0))
-            ptts = int(item.get("ptts", 0))
-            order_ptts[order] = ptts
-        except (ValueError, TypeError):
-            pass
-
-    # 실시간 기상 데이터 (화성 봉담 / 과천 / 사당 일대, 5분 캐시)
-    if CACHE_WEATHER["data"] and (now - CACHE_WEATHER["timestamp"] < WEATHER_CACHE_TTL):
-        weather_shap, weather_desc, weather_pct = CACHE_WEATHER["data"]
-    else:
-        weather_shap = "+0.0분"
-        weather_desc = "정상 노면 상태"
-        weather_pct = 5
-        try:
-            rw = requests.get(
-                "https://api.open-meteo.com/v1/forecast?latitude=37.21&longitude=126.97&current=temperature_2m,precipitation",
-                headers=GBIS_HEADERS,
-                timeout=3
-            )
-            cw = rw.json().get("current", {})
-            rain_val = float(cw.get("precipitation", 0.0))
-            temp_val = float(cw.get("temperature_2m", 15.0))
-            if rain_val > 0.5:
-                weather_shap = f"+{round(rain_val * 0.8, 1)}분"
-                weather_desc = f"실시간 강수 {rain_val}mm (노면 미끄럼 감속)"
-                weather_pct = 15
-            else:
-                weather_desc = f"기온 {temp_val}℃ (노면 양호, 시야 확보)"
-            CACHE_WEATHER["data"] = (weather_shap, weather_desc, weather_pct)
-            CACHE_WEATHER["timestamp"] = now
-        except Exception:
-            pass
-
-    if direction == "DOWN":
-        # 1. 사당역 9번 출구 회차 및 승하차
-        q_sec = order_ptts.get(32, 120) + order_ptts.get(33, 180)
-        q_delay = round(max(0.8, (q_sec - 180) / 60), 1)
-
-        # 2. 과천대로 - 남태령 구간
-        nam_sec = sum(order_ptts.get(o, 60) for o in range(34, 38))
-        nam_delay = round(max(0.6, (nam_sec - 180) / 60), 1)
-
-        # 3. 의왕과천로 (과천IC - 의왕TG)
-        toll_sec = sum(order_ptts.get(o, 80) for o in range(38, 47))
-        toll_delay = round(max(0.8, (toll_sec - 500) / 60), 1)
-
-        # 4. 봉담IC 진출 및 봉담 시내
-        city_sec = sum(order_ptts.get(o, 50) for o in range(47, 67))
-        city_delay = round(max(0.5, (city_sec - 600) / 60), 1)
-
-        total = q_delay + nam_delay + toll_delay + city_delay + 0.3
-        result = [
-            {"factor": "사당역 9번 출구 승하차 및 대기열", "shapValue": f"+{q_delay}분", "percentage": int(q_delay / total * 100), "color": "bg-rose-500", "desc": f"GBIS 실시간 정류소 통과 {q_sec}초 반영"},
-            {"factor": "과천대로 - 남태령 퇴근길 통행량", "shapValue": f"+{nam_delay}분", "percentage": int(nam_delay / total * 100), "color": "bg-amber-500", "desc": f"남태령 실시간 통과 소요 {nam_sec}초"},
-            {"factor": "의왕과천로 (학의JC - 의왕TG) 주행 감속", "shapValue": f"+{toll_delay}분", "percentage": int(toll_delay / total * 100), "color": "bg-blue-500", "desc": f"고속화도로 실시간 주행 {toll_sec}초"},
-            {"factor": "봉담IC 진출 및 봉담 시내 신호 대기", "shapValue": f"+{city_delay}분", "percentage": int(city_delay / total * 100), "color": "bg-indigo-500", "desc": f"봉담 시내 실시간 통과 {city_sec}초"},
-            {"factor": "실시간 기상 및 도로 노면 상태", "shapValue": weather_shap, "percentage": weather_pct, "color": "bg-emerald-500", "desc": weather_desc}
-        ]
-    else:
-        # 상행 (사당역행)
-        # 1. 봉담과천로 고속화도로
-        toll_sec = sum(order_ptts.get(o, 80) for o in range(19, 29))
-        toll_delay = round(max(0.8, (toll_sec - 550) / 60), 1)
-
-        # 2. 과천IC - 남태령 서울 진입 병목
-        sadang_sec = sum(order_ptts.get(o, 80) for o in range(29, 32))
-        sadang_delay = round(max(0.6, (sadang_sec - 200) / 60), 1)
-
-        # 3. 봉담 시내 구간
-        city_sec = sum(order_ptts.get(o, 50) for o in range(1, 19))
-        city_delay = round(max(0.6, (city_sec - 600) / 60), 1)
-
-        # 4. 협성대 기점 출발 정시성
-        dep_delay = round(max(0.4, (order_ptts.get(1, 60) - 40) / 60), 1)
-
-        total = toll_delay + sadang_delay + city_delay + dep_delay + 0.3
-        result = [
-            {"factor": "봉담과천로 (의왕TG - 청계IC) 실시간 통행량", "shapValue": f"+{toll_delay}분", "percentage": int(toll_delay / total * 100), "color": "bg-rose-500", "desc": f"고속화도로 실시간 통과 {toll_sec}초 집계"},
-            {"factor": "과천IC - 남태령 고개 서울 진입 병목", "shapValue": f"+{sadang_delay}분", "percentage": int(sadang_delay / total * 100), "color": "bg-amber-500", "desc": f"사당 방면 고가/남태령 실시간 {sadang_sec}초"},
-            {"factor": "봉담 시내 구간 승하차 및 신호 연동", "shapValue": f"+{city_delay}분", "percentage": int(city_delay / total * 100), "color": "bg-blue-500", "desc": f"시내 정류장 구간 실시간 {city_sec}초"},
-            {"factor": "협성대 기점 출발 정시성 요인", "shapValue": f"+{dep_delay}분", "percentage": int(dep_delay / total * 100), "color": "bg-indigo-500", "desc": f"기점 출차 지표 {order_ptts.get(1, 60)}초"},
-            {"factor": "실시간 기상 및 도로 노면 상태", "shapValue": weather_shap, "percentage": weather_pct, "color": "bg-emerald-500", "desc": weather_desc}
-        ]
-
-    CACHE_TRAFFIC_DELAYS[direction] = {"data": result, "timestamp": now}
-    return result
-
-# ⭐ 5대 정류장별 XAI 프로필
-STATION_XAI_PROFILES = {
-    "119000302": {
-        "name": "사당역9번출구앞",
-        "dir": "DOWN",
-        "dirText": "수원대행 (하행)",
-        "seq": 2,
-        "summary": "사당역 9번 출구는 승객 대기열(줄 길이)이 탑승 여부의 제1 요인입니다. 학우들의 실시간 줄 제보가 XAI 분석에 직결됩니다.",
-        "boardingTip": "등교시간대 만석 시 다른 방법을 고려하세요."
-    },
-    "233003021": {
-        "name": "수원대입구",
-        "dir": "UP",
-        "dirText": "사당역행 (상행)",
-        "seq": 16,
-        "summary": "수원대입구는 봉담 시내 마지막 주요 정류장으로, 앞선 정류장(효행초/아이파크/신명) 승차 누적으로 인해 하교 피크 시 잔여좌석 소진율이 가장 높습니다.",
-        "boardingTip": "하교 피크(15:25~17:30)에는 잔여 15석 미만일 경우 다음 차량이나 앞 정류장(신명/아이파크) 승차를 고려하세요."
-    },
-    "233002255": {
-        "name": "신명아파트",
-        "dir": "UP",
-        "dirText": "사당역행 (상행)",
-        "seq": 14,
-        "summary": "신명아파트는 대단지 주거지역 승차가 집중되는 지점입니다. 수원대입구 전 정류장으로 잔여좌석 착석 확률이 15~20% 더 양호합니다.",
-        "boardingTip": "수원대입구보다 1개 정류장 앞서 탑승하므로 하교 시간대에는 아슬아슬합니다."
-    },
-    "233002371": {
-        "name": "아이파크정문",
-        "dir": "UP",
-        "dirText": "사당역행 (상행)",
-        "seq": 12,
-        "summary": "아이파크정문은 기점 출발 초기 정류장으로, 잔여좌석이 여유로워 안정적 착석 승차가 보장되는 정류장입니다. 다만 하교 시간대에는 잔여좌석이 빠르게 소진될 수 있습니다.",
-        "boardingTip": "기점에서 불과 몇 정거장 지나지 않은 구간으로, 버스 도착 시간에 맞춰 나오시면 여유롭게 착석할 수 있습니다."
-    },
-    "233002245": {
-        "name": "효행초등학교정문",
-        "dir": "UP",
-        "dirText": "사당역행 (상행)",
-        "seq": 10,
-        "summary": "효행초정문은 협성대 기점 바로 다음의 극초반 정류장입니다. 잔여좌석이 45석 내외로 사실상 빈 차 상태로 진입하여 착석 성공률이 99%입니다.",
-        "boardingTip": "기점 인근 최고의 명당 정류장입니다. 버스 진입 시 즉시 원하는 자리에 착석할 수 있습니다."
-    }
-}
-# 상행(사당행) 정류장 순서 노드 체인 (효행초 -> 아이파크 -> 신명 -> 수원대입구)
-UPSTREAM_STATION_CHAIN = [
-    {"id": "233002245", "name": "효행초", "seq": 10},
-    {"id": "233002371", "name": "아이파크", "seq": 12},
-    {"id": "233002255", "name": "신명아파트", "seq": 14},
-    {"id": "233003021", "name": "수원대입구", "seq": 16}
-]
 
 def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, crowd_info: dict) -> tuple[list, bool]:
     """
@@ -1418,7 +1151,7 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                     # 피크 시간대에는 제보자가 '여유'를 눌러도 비사용자 및 일반 시민 기본 대기열이 존재
                     if is_friday_night:
                         est_waiters = 22
-                        crowd_desc = f"학우 실시간 제보(여유) + 불금 심야 서울 모임 귀가객 대기열: 약 {est_waiters}명 차감 반영"
+                        crowd_desc = f"학우 실시간 제보(여유) + 심야 귀가객 대기열: 약 {est_waiters}명 차감 반영"
                     elif is_morning_rush:
                         est_waiters = 16
                         crowd_desc = f"학우 실시간 제보(여유) + 비사용자 대기열: 약 {est_waiters}명 차감 반영"
@@ -1437,9 +1170,9 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                     est_waiters = max(min_mod, int(round(base_mod * decay_fac)))
                     delta = 4
                     tft_crowd_weight = 45
-                    crowd_desc = (f"학우 실시간 제보(보통) + {'불금 심야 귀가객' if is_friday_night else '비사용자'} 대기열: 약 {est_waiters}명 차감 반영"
+                    crowd_desc = (f"학우 실시간 제보(보통) + {'심야 귀가객' if is_friday_night else '비사용자'} 대기열: 약 {est_waiters}명 차감 반영"
                                   if not is_sticky else
-                                  f"직전 제보 잔류 + {'불금 심야' if is_friday_night else '비사용자'} 대기열: 약 {est_waiters}명 차감 반영")
+                                  f"직전 제보 잔류 + {'심야 귀가객' if is_friday_night else '비사용자'} 대기열: 약 {est_waiters}명 차감 반영")
                     is_from_report = True
                 elif crowd_status == "crowded":
                     base_crowd = 60 if is_friday_night else (52 if is_morning_rush else (54 if is_evening_rush else 30))
@@ -1447,9 +1180,9 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                     est_waiters = max(min_crowd, int(round(base_crowd * decay_fac)))
                     delta = 5
                     tft_crowd_weight = 50
-                    crowd_desc = (f"학우 실시간 제보(포화) + {'불금 심야 막차 대란' if is_friday_night else '비사용자 대기열'}: 약 {est_waiters}명 대폭 차감 반영"
+                    crowd_desc = (f"학우 실시간 제보(포화) + {'심야 막차 대기열' if is_friday_night else '비사용자 대기열'}: 약 {est_waiters}명 대폭 차감 반영"
                                   if not is_sticky else
-                                  f"직전 혼잡 제보 잔류 + {'불금 심야' if is_friday_night else '비사용자'} 대기열: 약 {est_waiters}명 대폭 차감 반영")
+                                  f"직전 혼잡 제보 잔류 + {'심야 막차 대기열' if is_friday_night else '비사용자'} 대기열: 약 {est_waiters}명 대폭 차감 반영")
                     is_from_report = True
                 else:
                     # ⭐ 실시간 제보 부재 시: 수원대 통학 시간표·불금 심야 모델 및 실시간 온라인 머신러닝 모델 가동
@@ -1555,7 +1288,7 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                     delta = 3
                     tft_crowd_weight = 52
                     crowd_desc = f"아이파크 대기열(약 {est_waiters}명) 및 잔여 좌석 분석"
-                    surge_warn = " 🚨(효행초 조기 승차 영향 주의)" if is_hyohaeng_surge else ""
+                    surge_warn = " (효행초 조기 승차 영향 주의)" if is_hyohaeng_surge else ""
                     decision_text = f"차량('{plate}', {bus_type_title})은 기점 출발 초기 구간(잔여 {seats}석)으로, 앞선 정류장 승차를 감안해도 여유롭게 착석 탑승이 가능합니다.{surge_warn}"
 
                 elif station_id == "233002255":  # 신명아파트 (기점 14번째)
@@ -1640,7 +1373,7 @@ def calculate_bus_predictions(station_id: str, arriving: list, vehicles: list, c
                     tft_crowd_weight = 40 if is_from_report else 35
                     crowd_desc = f"학우 실시간 제보({crowd_info['statusText']}): 수원대 대기열 분석 (신뢰 완충)" if is_from_report else "수원대 대기열 및 잔여 좌석 종합 분석"
 
-                    surge_warn = " 🚨(앞 정류장 조기 승차 급증으로 잔여 좌석이 빠르게 줄어들 수 있습니다)" if is_hyohaeng_surge else ""
+                    surge_warn = " (앞 정류장 조기 승차 급증으로 잔여 좌석이 빠르게 줄어들 수 있습니다)" if is_hyohaeng_surge else ""
 
                     if is_from_report:
                         if seat_diff >= 5:
@@ -1795,7 +1528,7 @@ def get_xai_analysis(station_id: str = Query("119000302")):
     model_meta = {
         "modelName": "7790 스마트 통학 지원 AI",
         "algorithm": "전 요일·전 시간대 실시간 온라인 학습(Online-ML) + 불감대 좌석 예측",
-        "dataSources": ["경기도 버스 실시간 GPS", "기상청 실시간 기상/노면 데이터", f"{profile['name']} 학우 실시간 제보 & {'등교·퇴근·불금 심야 패턴' if is_down else '하교 통학 패턴'}"],
+        "dataSources": ["경기도 버스 실시간 GPS", "기상청 실시간 기상/노면 데이터", f"{profile['name']} 학우 실시간 제보 & {'등교·퇴근·심야 귀가 패턴' if is_down else '하교 통학 패턴'}"],
         "totalActiveBuses": len(vehicles),
         "confidenceLevel": "95% 착석 신뢰 보증",
         "modelVersion": "v3.2-OnlineML",
@@ -1830,30 +1563,7 @@ def get_timetable():
     """7790번 첫차/막차, 배차간격, MiRi 예약버스 고정 시간표"""
     return {
         "success": True,
-        "regular": {
-            "origin": "협성대 기점",
-            "firstBus": "05:00",
-            "lastBus": "23:30 (토/공휴일 22:50)",
-            "suwonUnivFirstApprox": "05:12경",
-            "turn": "사당역 9번 출구",
-            "sadangFirstBus": "06:00",
-            "sadangLastBus": "00:30 (토/공휴일 00:00)",
-            "interval": "평일 10~25분 (출퇴근 10~15분 집중) / 주말 20~30분",
-            "tel": "경진여객 안녕영업소 (031-223-9022)"
-        },
-        "miri": {
-            "title": "7790(예약) 출근 전용 전세버스",
-            "app": "경기스마트폰 앱 (MiRi)",
-            "operationRoute": "봉담(협성대·상봉초) -> 사당역 (상행 출근 편도 전용)",
-            "weekdayDepartures": ["07:30", "07:50", "08:10"],
-            "sadangDepartures": "사당역 출발 예약 없음 (전석 공차 회송 / 일반 현장 줄서기 이용)",
-            "note": "외부 임차 전세버스(경기 79사/바/아/자 및 9000번대)로 운행되며, 사당역 9번 출구에서는 예약 탑승이 없으므로 일반 정규 버스(경기 70사/76아)만 탑승 가능합니다."
-        },
-        "nightGuide": {
-            "sadangLastBus": "00:30",
-            "recommendedQueueTime": "23:50 ~ 00:10 사이 줄 서기 권장",
-            "suwonUnivArrivalApprox": "새벽 01:10 ~ 01:25경 도착"
-        }
+        **TIMETABLE_INFO
     }
 
 # 브라우저 PWA /sw.js 404 방지 더미 엔드포인트
