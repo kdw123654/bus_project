@@ -63,11 +63,92 @@ CACHE_WEATHER = {"data": None, "timestamp": 0.0}
 CACHE_GBIS_ROUTE = {"data": None, "timestamp": 0.0}   # GBIS 노선/차량/소요시간 단일 통합 인메모리 캐시
 CROWD_REPORT_IP_RATE_LIMIT = {}  # {ip: [timestamps]} - 캠퍼스 Wi-Fi 분당 도배 방지
 
+# ⭐ 불감대(Deadband) 기반 좌석 예측 앵커링(Lock-in) 레지스트리
+# 버스가 기점에서 출발하여 타겟 정류장에 도달할 때까지, 정상 예측 오차 범위(Deadband) 내에서는
+# 숫자가 11석 -> 9석 -> 12석처럼 널뛰지(Jitter) 않도록 초기 예측값을 안정적으로 고정 유지합니다.
+# 만약 단체 승차 등으로 허용 오차 범위를 유의미하게 벗어나면(Out-of-bound) 즉시 새 기준으로 갱신(Re-anchor)합니다.
+PREDICTION_LOCK_REGISTRY = {}  # {f"{station_id}_{plate}": dict}
+
 BUS_CACHE_TTL = 6.0          # 6초 캐시: 동시 접속자가 100명이어도 외부 API는 6초에 1번만 호출
 XAI_CACHE_TTL = 5.0          # 5초 XAI 분석 캐시
 TRAFFIC_CACHE_TTL = 12.0     # 12초 캐시
 WEATHER_CACHE_TTL = 300.0    # 5분 캐시
 GBIS_ROUTE_CACHE_TTL = 8.0   # 8초 GBIS 실시간 데이터 공유 캐시 (도착/차량/소요시간 중복 요청 방어)
+
+def apply_prediction_deadband_lock(
+    station_id: str,
+    plate: str,
+    new_expected: int,
+    new_lower: int,
+    new_upper: int,
+    new_range: str,
+    new_prob: int,
+    new_status: str,
+    new_color: str,
+    new_decision: str,
+    predict_min: int,
+    is_resv: bool
+):
+    """
+    [불감대(Deadband) & 히스테리시스 예측 앵커링 엔진]
+    기점에서 버스가 출발한 후 타겟 정류장까지 이동하는 동안,
+    실시간 산출 좌석수가 기존 예측 신뢰 구간 [lower_bound, upper_bound] 안에 들어오면
+    숫자 널뛰기(Jitter)를 방지하고 사용자 신뢰도를 극대화하기 위해 최초 예측값을 고정 유지합니다.
+    예측 범위를 벗어나는 급격한 승하차가 발생할 때만 새로운 현실로 Re-anchor합니다.
+    """
+    global PREDICTION_LOCK_REGISTRY
+    if is_resv or not plate:
+        return new_expected, new_lower, new_upper, new_range, new_prob, new_status, new_color, new_decision
+
+    now = time.time()
+    lock_key = f"{station_id}_{plate}"
+
+    # 버스가 정류장에 진입 완료(1분 이하) 시 락 해제
+    if predict_min <= 1:
+        PREDICTION_LOCK_REGISTRY.pop(lock_key, None)
+        return new_expected, new_lower, new_upper, new_range, new_prob, new_status, new_color, new_decision
+
+    record = PREDICTION_LOCK_REGISTRY.get(lock_key)
+    # 20분 이상 경과한 오래된 레코드는 만료 처리
+    if record and (now - record["timestamp"] > 1200):
+        record = None
+
+    if record:
+        locked_low = record["lower_bound"]
+        locked_high = record["upper_bound"]
+
+        # ⭐ 핵심 검증: 실시간 계산치가 이전 예측 신뢰 구간(Deadband) 내에 머무르고 있는가?
+        if locked_low <= new_expected <= locked_high:
+            # 정상 오차 범위 내의 미세 변동이므로 약속된 예측값을 고정 유지 (Jitter 방지)
+            record["timestamp"] = now  # 갱신 유지
+            return (
+                record["locked_expected"],
+                record["lower_bound"],
+                record["upper_bound"],
+                record["seat_range"],
+                record["boarding_prob"],
+                record["boarding_status"],
+                record["prob_color"],
+                record["decision_text"]
+            )
+        else:
+            # 🚨 예측 신뢰 구간 이탈(돌발 승하차/노선 급변 감지) -> 새 기준으로 재앵커링!
+            pass
+
+    # 신규 앵커 등록 또는 허용 범위 이탈로 인한 새 기준점 수립
+    PREDICTION_LOCK_REGISTRY[lock_key] = {
+        "locked_expected": new_expected,
+        "lower_bound": new_lower,
+        "upper_bound": new_upper,
+        "seat_range": new_range,
+        "boarding_prob": new_prob,
+        "boarding_status": new_status,
+        "prob_color": new_color,
+        "decision_text": new_decision,
+        "timestamp": now
+    }
+    return new_expected, new_lower, new_upper, new_range, new_prob, new_status, new_color, new_decision
+
 
 # 💡 GBIS 및 공공기관 방화벽(WAF) 차단 방지를 위한 브라우저 User-Agent
 GBIS_HEADERS = {
@@ -1410,6 +1491,31 @@ def get_xai_analysis(station_id: str = Query("119000302")):
                 seat_range = f"0~{upper_bound}석 (만석 주의)"
             else:
                 seat_range = "0석 (만석 대기)" if is_down else "0석 (만석)"
+
+            # ⭐ [불감대(Deadband) 앵커링 엔진] 정상 예측 오차 범위 내 숫자 널뛰기(Jitter) 방지 및 일관성 보장
+            (
+                seat_expected,
+                lower_bound,
+                upper_bound,
+                seat_range,
+                boarding_prob,
+                boarding_status,
+                prob_color,
+                decision_text
+            ) = apply_prediction_deadband_lock(
+                station_id=station_id,
+                plate=plate,
+                new_expected=seat_expected,
+                new_lower=lower_bound,
+                new_upper=upper_bound,
+                new_range=seat_range,
+                new_prob=boarding_prob,
+                new_status=boarding_status,
+                new_color=prob_color,
+                new_decision=decision_text,
+                predict_min=predict_min,
+                is_resv=is_resv
+            )
 
             confidence = 95.0
             features = [
