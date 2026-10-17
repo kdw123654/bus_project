@@ -18,15 +18,20 @@ if hasattr(sys.stdout, "reconfigure"):
 
 def run_evaluation_report():
     print("=" * 68)
-    print("[7790 스마트 통학 AI] 전 요일·전 시간대 온라인 학습 상태 리포트")
+    print("[7790 스마트 통학 AI] 요일별 온라인 AI 학습 상태 리포트")
     print("=" * 68)
 
     summary = online_learner.get_status_summary()
     print(f"- 학습 엔진      : {summary['engine']}")
     print(f"- 커버리지       : {summary['coverage']}")
+    print(f"- 현재 적용 그룹 : {summary.get('currentDayGroupName', '')}")
     print(f"- 사당역 누적 학습: {summary['totalSadangLearned']}대")
     print(f"- 상행 누적 학습  : {summary['totalUpstreamLearned']}대")
-    print(f"- 활성 시간 버킷  : {summary['activeTimeBuckets']}개 슬롯")
+    if "dayGroups" in summary:
+        print("\n[요일군별 독립 학습 현황]")
+        for k, dg in summary["dayGroups"].items():
+            print(f"  * {dg['name']}: 사당 {dg['sadangLearned']}대 | 상행 {dg['upstreamLearned']}대 | ML반영률 {dg['mlWeightPct']}%")
+    print(f"\n- 활성 시간 버킷  : {summary['activeTimeBuckets']}개 슬롯")
     if summary["maeSeats"] is not None:
         print(f"- 평균 절대 오차  : +-{summary['maeSeats']}석 (MAE)")
         print(f"- +-4석 이내 적중률: {summary['within4SeatsAccuracy']}%")

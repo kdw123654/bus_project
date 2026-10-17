@@ -1436,6 +1436,38 @@ def get_ml_status():
         "onlineLearning": online_learner.get_status_summary()
     }
 
+@app.get("/api/backup/export")
+def export_backup_data():
+    """서버에 축적된 텔레메트리 CSV 및 학습 모델 상태를 JSON으로 추출 (동기화 및 백업용)"""
+    sadang_csv = ""
+    if os.path.exists("data/sadang_telemetry.csv"):
+        try:
+            with open("data/sadang_telemetry.csv", "r", encoding="utf-8-sig") as f:
+                sadang_csv = f.read()
+        except Exception:
+            pass
+    upstream_csv = ""
+    if os.path.exists("data/upstream_telemetry.csv"):
+        try:
+            with open("data/upstream_telemetry.csv", "r", encoding="utf-8-sig") as f:
+                upstream_csv = f.read()
+        except Exception:
+            pass
+    model_json = {}
+    if os.path.exists("models/sadang_online_model.json"):
+        try:
+            with open("models/sadang_online_model.json", "r", encoding="utf-8") as f:
+                model_json = json.load(f)
+        except Exception:
+            pass
+    return {
+        "success": True,
+        "sadang_csv": sadang_csv,
+        "upstream_csv": upstream_csv,
+        "model_json": model_json,
+        "summary": online_learner.get_status_summary()
+    }
+
 @app.get("/api/timetable")
 def get_timetable():
     """7790번 첫차/막차, 배차간격, MiRi 예약버스 고정 시간표"""

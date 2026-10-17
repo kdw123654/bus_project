@@ -933,7 +933,7 @@
                 <span>7790 실시간 통학 지원 AI · 온라인 자동 학습</span>
               </div>
               <span class="text-[9.5px] sm:text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-bold whitespace-nowrap flex items-center">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span>전요일·전시간대 학습 중
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span>요일별 AI 학습 중
               </span>
             </div>
 
@@ -953,6 +953,11 @@
                 <span class="font-bold text-indigo-300">사당·상류 통과 버스 실측 역산 학습</span>
                 <span class="font-bold text-emerald-400 whitespace-nowrap">누적 ${sadangLearned}대 학습 (ML 반영률 ${mlWeight}%)</span>
               </div>
+              <div class="text-[9.5px] text-slate-400 flex justify-between items-center pt-0.5">
+                <span class="${ol.currentDayGroup === 'weekday' ? 'text-emerald-300 font-bold' : ''}">평일(월~목) ${ol.dayGroups?.weekday?.sadangLearned ?? 0}대${ol.currentDayGroup === 'weekday' ? ' (학습중)' : ''}</span>
+                <span class="${ol.currentDayGroup === 'friday' ? 'text-emerald-300 font-bold' : ''}">금요일 ${ol.dayGroups?.friday?.sadangLearned ?? 0}대${ol.currentDayGroup === 'friday' ? ' (학습중)' : ''}</span>
+                <span class="${ol.currentDayGroup === 'weekend' ? 'text-emerald-300 font-bold' : ''}">주말 ${ol.dayGroups?.weekend?.sadangLearned ?? 0}대${ol.currentDayGroup === 'weekend' ? ' (학습중)' : ''}</span>
+              </div>
               ${lastSadang ? `
               <div class="text-[10px] text-gray-400 flex items-center justify-between pt-1 border-t border-slate-700/60">
                 <span>최근 사당 통과 버스 실측 (${escapeHtml(lastSadang.plate)})</span>
@@ -960,7 +965,7 @@
               </div>
               ` : `
               <div class="text-[10px] text-gray-400 pt-0.5">
-                사당역 통과 시 잔여석 변화량(45석-잔여석)을 실시간 감지해 요일·시간대별 가중치를 자동 갱신합니다.
+                사당역 통과 시 잔여석 변화량(45석-잔여석)을 실시간 감지해 요일군별 가중치를 자동 갱신합니다.
               </div>
               `}
             </div>
@@ -971,6 +976,11 @@
                 <span class="font-bold text-indigo-300">수원대·상류 통과 버스 실측 역산 학습</span>
                 <span class="font-bold text-emerald-400 whitespace-nowrap">누적 ${upstreamLearned}대 학습 (ML 반영률 ${mlWeight}%)</span>
               </div>
+              <div class="text-[9.5px] text-slate-400 flex justify-between items-center pt-0.5">
+                <span class="${ol.currentDayGroup === 'weekday' ? 'text-emerald-300 font-bold' : ''}">평일(월~목) ${ol.dayGroups?.weekday?.upstreamLearned ?? 0}대${ol.currentDayGroup === 'weekday' ? ' (학습중)' : ''}</span>
+                <span class="${ol.currentDayGroup === 'friday' ? 'text-emerald-300 font-bold' : ''}">금요일 ${ol.dayGroups?.friday?.upstreamLearned ?? 0}대${ol.currentDayGroup === 'friday' ? ' (학습중)' : ''}</span>
+                <span class="${ol.currentDayGroup === 'weekend' ? 'text-emerald-300 font-bold' : ''}">주말 ${ol.dayGroups?.weekend?.upstreamLearned ?? 0}대${ol.currentDayGroup === 'weekend' ? ' (학습중)' : ''}</span>
+              </div>
               ${lastUpstream ? `
               <div class="text-[10px] text-gray-400 flex items-center justify-between pt-1 border-t border-slate-700/60">
                 <span>최근 수원대 통과 버스 실측 (${escapeHtml(lastUpstream.plate)})</span>
@@ -978,7 +988,7 @@
               </div>
               ` : `
               <div class="text-[10px] text-gray-400 pt-0.5">
-                수원대 통과 시 잔여석 변화량을 실시간 감지해 요일·시간대별 가중치를 자동 갱신합니다.
+                수원대 통과 시 잔여석 변화량을 실시간 감지해 요일군별 가중치를 자동 갱신합니다.
               </div>
               `}
             </div>
