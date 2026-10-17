@@ -159,7 +159,7 @@ def get_real_client_ip(request: Request) -> str:
 
 @app.get("/")
 def get_home():
-    return FileResponse("static/index.html")
+    return FileResponse("static/index.html", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 @app.get("/api/buses")
@@ -265,7 +265,16 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
                 short_plate=short_plate,
                 reservation_flag=v.get("reservation", "")
             )
-            target_station = str(v.get("fromStationId") or v.get("toStationId") or "")
+            from_st = str(v.get("fromStationId") or "")
+            to_st = str(v.get("toStationId") or "")
+            pos_raw = v.get("busPosition")
+            bus_pos = ""
+            if isinstance(pos_raw, list) and pos_raw:
+                bus_pos = str(pos_raw[0]).strip()
+            elif isinstance(pos_raw, str):
+                bus_pos = pos_raw.strip()
+            
+            target_station = from_st or to_st
             
             live_vehicles.append({
                 "plateNo": plate,
@@ -274,6 +283,9 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
                 "isReserved": is_reserved,
                 "isDoubleDecker": (v.get("lowPlate") == "2"),
                 "currentStationId": target_station,
+                "fromStationId": from_st,
+                "toStationId": to_st,
+                "busPosition": bus_pos,
                 "dir": v.get("busDirList", [""])[0]
             })
     except Exception as e:
@@ -413,7 +425,15 @@ def _background_telemetry_learning_loop():
                             short_plate=short_plate,
                             reservation_flag=v.get("reservation", "")
                         )
-                        target_st = str(v.get("fromStationId") or v.get("toStationId") or "")
+                        from_st = str(v.get("fromStationId") or "")
+                        to_st = str(v.get("toStationId") or "")
+                        pos_raw = v.get("busPosition")
+                        bus_pos = ""
+                        if isinstance(pos_raw, list) and pos_raw:
+                            bus_pos = str(pos_raw[0]).strip()
+                        elif isinstance(pos_raw, str):
+                            bus_pos = pos_raw.strip()
+                        target_st = from_st or to_st
                         parsed_vehicles.append({
                             "plateNo": plate,
                             "shortPlate": short_plate,
@@ -421,6 +441,9 @@ def _background_telemetry_learning_loop():
                             "isReserved": is_resv,
                             "isDoubleDecker": (v.get("lowPlate") == "2"),
                             "currentStationId": target_st,
+                            "fromStationId": from_st,
+                            "toStationId": to_st,
+                            "busPosition": bus_pos,
                             "dir": v.get("busDirList", [""])[0]
                         })
                     sadang_c = get_crowd_summary(station_id="119000302").get("status", "none")
@@ -1435,6 +1458,88 @@ def get_ml_status():
         "success": True,
         "onlineLearning": online_learner.get_status_summary()
     }
+
+def _merge_csv_file(file_path: str, remote_text: str, key_fn, sort_fn):
+    import csv, io
+    rows = []
+    seen = set()
+    header = None
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8-sig") as f:
+                reader = csv.reader(f)
+                header = next(reader, None)
+                for r in reader:
+                    if not r:
+                        continue
+                    k = key_fn(r)
+                    if k not in seen:
+                        seen.add(k)
+                        rows.append(r)
+        except Exception:
+            pass
+    remote_reader = csv.reader(io.StringIO(remote_text))
+    remote_header = next(remote_reader, None)
+    if not header:
+        header = remote_header
+    for r in remote_reader:
+        if not r:
+            continue
+        try:
+            k = key_fn(r)
+            if k not in seen:
+                seen.add(k)
+                rows.append(r)
+        except Exception:
+            pass
+    rows.sort(key=sort_fn)
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f)
+        if header:
+            writer.writerow(header)
+        writer.writerows(rows)
+    return len(rows)
+
+@app.post("/api/ml-reload")
+def reload_ml_model():
+    """온라인 학습 모델 및 텔레메트리 최신 상태 다시 불러오기"""
+    global CACHE_XAI_ANALYSIS
+    online_learner.load_state()
+    CACHE_XAI_ANALYSIS.clear()
+    return {"success": True, "onlineLearning": online_learner.get_status_summary()}
+
+@app.post("/api/backup/sync-render")
+def sync_from_render():
+    """Render 배포 서버의 최신 텔레메트리 CSV 및 학습 데이터를 가져와 로컬과 병합 동기화"""
+    import urllib.request
+    global CACHE_XAI_ANALYSIS
+    try:
+        req = urllib.request.Request(
+            "https://bus-project-e9nd.onrender.com/api/backup/export",
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as res:
+            data = json.loads(res.read().decode("utf-8"))
+        
+        remote_sadang = data.get("sadang_csv", "")
+        if remote_sadang:
+            _merge_csv_file("data/sadang_telemetry.csv", remote_sadang, lambda r: (r[0], r[5]), lambda r: r[0])
+            
+        remote_upstream = data.get("upstream_csv", "")
+        if remote_upstream:
+            _merge_csv_file("data/upstream_telemetry.csv", remote_upstream, lambda r: (r[0], r[1], r[6]), lambda r: r[0])
+            
+        online_learner.rebuild_from_csvs()
+        online_learner.save_state()
+        CACHE_XAI_ANALYSIS.clear()
+        return {
+            "success": True,
+            "message": "Render 최신 학습 데이터 병합 동기화 완료",
+            "summary": online_learner.get_status_summary()
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 @app.get("/api/backup/export")
 def export_backup_data():

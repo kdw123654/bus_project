@@ -70,7 +70,7 @@
       ],
       "bias": 0.334975,
       "ewma_residual": -1.6732,
-      "last_departure_epoch": 1792217598.8607664,
+      "last_departure_epoch": 1792242432.3155196,
       "learned_buses": 6,
       "cumulative_abs_error": 98.0,
       "within_3_count": 1,
@@ -110,7 +110,7 @@
         "timeStr": "22:07",
         "weekday": 4,
         "dayGroup": "friday",
-        "timestamp": 1792217598.8607664
+        "timestamp": 1792242432.3155196
       }
     },
     "weekend": {
@@ -118,37 +118,37 @@
       "display_name": "주말(토·일)",
       "weights": [
         9e-06,
-        0.005331,
-        0.031,
-        0.163453,
-        0.353169,
-        0.397173,
-        0.481212,
-        0.019773,
-        8e-05,
+        0.005311,
+        0.030882,
+        0.162831,
+        0.351824,
+        0.396472,
+        0.903808,
+        1.261141,
+        1.566775,
+        1.347054,
+        2.458085,
+        0.715108,
+        0.026098,
+        -4.945854,
+        0.814584,
         0.0,
         0.0,
         0.0,
         0.0,
-        -0.409102,
-        -1.371445,
+        7.484382,
         0.0,
         0.0,
-        0.0,
-        0.0,
-        1.627366,
-        0.0,
-        0.0,
-        1.718269,
-        1.578348
+        6.418476,
+        6.776959
       ],
-      "bias": 0.814506,
-      "ewma_residual": 15.8802,
-      "last_departure_epoch": 1792217598.8976786,
-      "learned_buses": 18,
-      "cumulative_abs_error": 127.0,
-      "within_3_count": 5,
-      "eval_count": 18,
+      "bias": 3.750658,
+      "ewma_residual": 59.4807,
+      "last_departure_epoch": 1792242686.2553134,
+      "learned_buses": 45,
+      "cumulative_abs_error": 677.0,
+      "within_3_count": 7,
+      "eval_count": 45,
       "bucket_stats": {
         "18": {
           "count": 1,
@@ -221,18 +221,102 @@
           "mean": 26.0,
           "ewma": 26.0,
           "last_actual": 26
+        },
+        "31": {
+          "count": 2,
+          "mean": 24.0,
+          "ewma": 26.7,
+          "last_actual": 15
+        },
+        "32": {
+          "count": 1,
+          "mean": 45.0,
+          "ewma": 45.0,
+          "last_actual": 45
+        },
+        "33": {
+          "count": 2,
+          "mean": 25.5,
+          "ewma": 20.25,
+          "last_actual": 43
+        },
+        "34": {
+          "count": 1,
+          "mean": 34.0,
+          "ewma": 34.0,
+          "last_actual": 34
+        },
+        "35": {
+          "count": 2,
+          "mean": 33.5,
+          "ewma": 33.35,
+          "last_actual": 34
+        },
+        "36": {
+          "count": 1,
+          "mean": 26.0,
+          "ewma": 26.0,
+          "last_actual": 26
+        },
+        "37": {
+          "count": 2,
+          "mean": 51.5,
+          "ewma": 58.85,
+          "last_actual": 27
+        },
+        "38": {
+          "count": 3,
+          "mean": 31.0,
+          "ewma": 31.62,
+          "last_actual": 9
+        },
+        "39": {
+          "count": 2,
+          "mean": 33.0,
+          "ewma": 35.4,
+          "last_actual": 25
+        },
+        "40": {
+          "count": 1,
+          "mean": 46.0,
+          "ewma": 46.0,
+          "last_actual": 46
+        },
+        "41": {
+          "count": 1,
+          "mean": 36.0,
+          "ewma": 36.0,
+          "last_actual": 36
+        },
+        "42": {
+          "count": 6,
+          "mean": 43.0,
+          "ewma": 57.87,
+          "last_actual": 71
+        },
+        "43": {
+          "count": 2,
+          "mean": 76.0,
+          "ewma": 76.0,
+          "last_actual": 71
+        },
+        "44": {
+          "count": 1,
+          "mean": 76.0,
+          "ewma": 76.0,
+          "last_actual": 71
         }
       },
       "last_bus_event": {
-        "plate": "4548",
-        "actualBoarded": 26,
-        "remainSeats": 45,
+        "plate": "4545",
+        "actualBoarded": 71,
+        "remainSeats": 0,
         "isDoubleDecker": true,
-        "headwayGapMin": 20.5,
-        "timeStr": "15:11",
+        "headwayGapMin": 19.9,
+        "timeStr": "22:11",
         "weekday": 5,
         "dayGroup": "weekend",
-        "timestamp": 1792217598.8976786
+        "timestamp": 1792242686.2553134
       }
     }
   },
@@ -748,59 +832,547 @@
       "last_plate": "4556",
       "updated_at": "14:53",
       "dayGroup": "weekend"
+    },
+    "233002245_weekend_30": {
+      "count": 4,
+      "ewma_consumed": 6.8,
+      "last_remain": 68,
+      "last_plate": "4543",
+      "updated_at": "15:26",
+      "dayGroup": "weekend"
+    },
+    "233002371_weekend_30": {
+      "count": 5,
+      "ewma_consumed": 10.28,
+      "last_remain": 64,
+      "last_plate": "4543",
+      "updated_at": "15:27",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_30": {
+      "count": 5,
+      "ewma_consumed": 13.39,
+      "last_remain": 62,
+      "last_plate": "4543",
+      "updated_at": "15:28",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_30": {
+      "count": 3,
+      "ewma_consumed": 20.05,
+      "last_remain": 62,
+      "last_plate": "4543",
+      "updated_at": "15:28",
+      "dayGroup": "weekend"
+    },
+    "233002245_weekend_31": {
+      "count": 1,
+      "ewma_consumed": 5.0,
+      "last_remain": 66,
+      "last_plate": "4544",
+      "updated_at": "15:47",
+      "dayGroup": "weekend"
+    },
+    "233002371_weekend_31": {
+      "count": 1,
+      "ewma_consumed": 10.0,
+      "last_remain": 61,
+      "last_plate": "4544",
+      "updated_at": "15:48",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_31": {
+      "count": 1,
+      "ewma_consumed": 17.0,
+      "last_remain": 54,
+      "last_plate": "4544",
+      "updated_at": "15:49",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_31": {
+      "count": 1,
+      "ewma_consumed": 17.0,
+      "last_remain": 54,
+      "last_plate": "4544",
+      "updated_at": "15:50",
+      "dayGroup": "weekend"
+    },
+    "233002371_weekend_32": {
+      "count": 2,
+      "ewma_consumed": 4.75,
+      "last_remain": 63,
+      "last_plate": "4547",
+      "updated_at": "16:25",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_32": {
+      "count": 2,
+      "ewma_consumed": 12.1,
+      "last_remain": 55,
+      "last_plate": "4547",
+      "updated_at": "16:26",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_32": {
+      "count": 2,
+      "ewma_consumed": 12.1,
+      "last_remain": 55,
+      "last_plate": "4547",
+      "updated_at": "16:27",
+      "dayGroup": "weekend"
+    },
+    "233002245_weekend_32": {
+      "count": 1,
+      "ewma_consumed": 6.0,
+      "last_remain": 65,
+      "last_plate": "4547",
+      "updated_at": "16:24",
+      "dayGroup": "weekend"
+    },
+    "233002245_weekend_33": {
+      "count": 2,
+      "ewma_consumed": 5.3,
+      "last_remain": 41,
+      "last_plate": "1182",
+      "updated_at": "16:56",
+      "dayGroup": "weekend"
+    },
+    "233002371_weekend_33": {
+      "count": 2,
+      "ewma_consumed": 7.6,
+      "last_remain": 40,
+      "last_plate": "1182",
+      "updated_at": "16:57",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_33": {
+      "count": 2,
+      "ewma_consumed": 12.9,
+      "last_remain": 36,
+      "last_plate": "1182",
+      "updated_at": "16:58",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_33": {
+      "count": 2,
+      "ewma_consumed": 13.55,
+      "last_remain": 36,
+      "last_plate": "1182",
+      "updated_at": "16:59",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_34": {
+      "count": 2,
+      "ewma_consumed": 8.65,
+      "last_remain": 63,
+      "last_plate": "4542",
+      "updated_at": "17:16",
+      "dayGroup": "weekend"
+    },
+    "233002245_weekend_34": {
+      "count": 1,
+      "ewma_consumed": 4.0,
+      "last_remain": 67,
+      "last_plate": "4542",
+      "updated_at": "17:15",
+      "dayGroup": "weekend"
+    },
+    "233002371_weekend_34": {
+      "count": 1,
+      "ewma_consumed": 4.0,
+      "last_remain": 67,
+      "last_plate": "4542",
+      "updated_at": "17:16",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_34": {
+      "count": 1,
+      "ewma_consumed": 8.0,
+      "last_remain": 63,
+      "last_plate": "4542",
+      "updated_at": "17:17",
+      "dayGroup": "weekend"
+    },
+    "233002245_weekend_35": {
+      "count": 1,
+      "ewma_consumed": 5.0,
+      "last_remain": 66,
+      "last_plate": "4545",
+      "updated_at": "17:36",
+      "dayGroup": "weekend"
+    },
+    "233002371_weekend_35": {
+      "count": 2,
+      "ewma_consumed": 6.3,
+      "last_remain": 66,
+      "last_plate": "4548",
+      "updated_at": "17:52",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_35": {
+      "count": 2,
+      "ewma_consumed": 12.85,
+      "last_remain": 64,
+      "last_plate": "4548",
+      "updated_at": "17:54",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_35": {
+      "count": 2,
+      "ewma_consumed": 12.85,
+      "last_remain": 64,
+      "last_plate": "4548",
+      "updated_at": "17:55",
+      "dayGroup": "weekend"
+    },
+    "233002245_weekend_36": {
+      "count": 2,
+      "ewma_consumed": 6.85,
+      "last_remain": 70,
+      "last_plate": "4556",
+      "updated_at": "18:24",
+      "dayGroup": "weekend"
+    },
+    "233002371_weekend_36": {
+      "count": 2,
+      "ewma_consumed": 7.85,
+      "last_remain": 69,
+      "last_plate": "4556",
+      "updated_at": "18:25",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_36": {
+      "count": 2,
+      "ewma_consumed": 11.15,
+      "last_remain": 67,
+      "last_plate": "4556",
+      "updated_at": "18:28",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_36": {
+      "count": 2,
+      "ewma_consumed": 13.1,
+      "last_remain": 67,
+      "last_plate": "4556",
+      "updated_at": "18:29",
+      "dayGroup": "weekend"
+    },
+    "233002245_weekend_37": {
+      "count": 1,
+      "ewma_consumed": 1.0,
+      "last_remain": 70,
+      "last_plate": "4550",
+      "updated_at": "18:46",
+      "dayGroup": "weekend"
+    },
+    "233002371_weekend_37": {
+      "count": 1,
+      "ewma_consumed": 1.0,
+      "last_remain": 70,
+      "last_plate": "4550",
+      "updated_at": "18:46",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_37": {
+      "count": 1,
+      "ewma_consumed": 2.0,
+      "last_remain": 69,
+      "last_plate": "4550",
+      "updated_at": "18:47",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_37": {
+      "count": 1,
+      "ewma_consumed": 2.0,
+      "last_remain": 69,
+      "last_plate": "4550",
+      "updated_at": "18:48",
+      "dayGroup": "weekend"
+    },
+    "233002245_weekend_38": {
+      "count": 2,
+      "ewma_consumed": 1.0,
+      "last_remain": 70,
+      "last_plate": "4544",
+      "updated_at": "19:23",
+      "dayGroup": "weekend"
+    },
+    "233002371_weekend_38": {
+      "count": 2,
+      "ewma_consumed": 2.35,
+      "last_remain": 68,
+      "last_plate": "4544",
+      "updated_at": "19:24",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_38": {
+      "count": 2,
+      "ewma_consumed": 3.65,
+      "last_remain": 68,
+      "last_plate": "4544",
+      "updated_at": "19:24",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_38": {
+      "count": 2,
+      "ewma_consumed": 4.0,
+      "last_remain": 67,
+      "last_plate": "4544",
+      "updated_at": "19:26",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_39": {
+      "count": 1,
+      "ewma_consumed": 0.0,
+      "last_remain": 45,
+      "last_plate": "1265",
+      "updated_at": "19:43",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_39": {
+      "count": 1,
+      "ewma_consumed": 0.0,
+      "last_remain": 45,
+      "last_plate": "1265",
+      "updated_at": "19:44",
+      "dayGroup": "weekend"
+    },
+    "233002245_weekend_40": {
+      "count": 1,
+      "ewma_consumed": 4.0,
+      "last_remain": 67,
+      "last_plate": "4547",
+      "updated_at": "20:06",
+      "dayGroup": "weekend"
+    },
+    "233002371_weekend_40": {
+      "count": 2,
+      "ewma_consumed": 3.95,
+      "last_remain": 69,
+      "last_plate": "4555",
+      "updated_at": "20:27",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_40": {
+      "count": 2,
+      "ewma_consumed": 7.3,
+      "last_remain": 65,
+      "last_plate": "4555",
+      "updated_at": "20:29",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_40": {
+      "count": 1,
+      "ewma_consumed": 9.0,
+      "last_remain": 62,
+      "last_plate": "4547",
+      "updated_at": "20:08",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_41": {
+      "count": 2,
+      "ewma_consumed": 7.05,
+      "last_remain": 62,
+      "last_plate": "4541",
+      "updated_at": "20:57",
+      "dayGroup": "weekend"
+    },
+    "233002245_weekend_41": {
+      "count": 1,
+      "ewma_consumed": 1.0,
+      "last_remain": 70,
+      "last_plate": "4541",
+      "updated_at": "20:54",
+      "dayGroup": "weekend"
+    },
+    "233002371_weekend_41": {
+      "count": 1,
+      "ewma_consumed": 3.0,
+      "last_remain": 68,
+      "last_plate": "4541",
+      "updated_at": "20:54",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_41": {
+      "count": 1,
+      "ewma_consumed": 8.0,
+      "last_remain": 63,
+      "last_plate": "4541",
+      "updated_at": "20:55",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_42": {
+      "count": 5,
+      "ewma_consumed": 9.0,
+      "last_remain": 62,
+      "last_plate": "4545",
+      "updated_at": "21:20",
+      "dayGroup": "weekend"
+    },
+    "233002245_weekend_42": {
+      "count": 2,
+      "ewma_consumed": 2.0,
+      "last_remain": 69,
+      "last_plate": "4545",
+      "updated_at": "21:17",
+      "dayGroup": "weekend"
+    },
+    "233002371_weekend_42": {
+      "count": 3,
+      "ewma_consumed": 6.0,
+      "last_remain": 65,
+      "last_plate": "4545",
+      "updated_at": "21:18",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_42": {
+      "count": 3,
+      "ewma_consumed": 9.0,
+      "last_remain": 62,
+      "last_plate": "4545",
+      "updated_at": "21:20",
+      "dayGroup": "weekend"
+    },
+    "233002245_weekend_43": {
+      "count": 2,
+      "ewma_consumed": 3.35,
+      "last_remain": 67,
+      "last_plate": "4549",
+      "updated_at": "21:44",
+      "dayGroup": "weekend"
+    },
+    "233002371_weekend_43": {
+      "count": 2,
+      "ewma_consumed": 4.35,
+      "last_remain": 66,
+      "last_plate": "4549",
+      "updated_at": "21:45",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_43": {
+      "count": 3,
+      "ewma_consumed": 12.0,
+      "last_remain": 59,
+      "last_plate": "4549",
+      "updated_at": "21:46",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_43": {
+      "count": 3,
+      "ewma_consumed": 12.0,
+      "last_remain": 59,
+      "last_plate": "4549",
+      "updated_at": "21:47",
+      "dayGroup": "weekend"
+    },
+    "233002245_weekend_44": {
+      "count": 1,
+      "ewma_consumed": 3.0,
+      "last_remain": 68,
+      "last_plate": "4550",
+      "updated_at": "22:08",
+      "dayGroup": "weekend"
+    },
+    "233002371_weekend_44": {
+      "count": 1,
+      "ewma_consumed": 6.0,
+      "last_remain": 65,
+      "last_plate": "4550",
+      "updated_at": "22:09",
+      "dayGroup": "weekend"
+    },
+    "233002255_weekend_44": {
+      "count": 1,
+      "ewma_consumed": 10.0,
+      "last_remain": 61,
+      "last_plate": "4550",
+      "updated_at": "22:10",
+      "dayGroup": "weekend"
+    },
+    "233003021_weekend_44": {
+      "count": 1,
+      "ewma_consumed": 10.0,
+      "last_remain": 61,
+      "last_plate": "4550",
+      "updated_at": "22:11",
+      "dayGroup": "weekend"
     }
   },
   "group_upstream_learned": {
     "weekday": 0,
     "friday": 4,
-    "weekend": 18
+    "weekend": 42
   },
-  "total_learned_buses": 24,
-  "total_upstream_learned": 22,
+  "total_learned_buses": 51,
+  "total_upstream_learned": 46,
   "upstream_learned_trips": [
-    "4555_2026101621",
-    "4543_2026101711",
-    "4548_2026101622",
+    "1265_2026101716",
+    "4543_2026101717",
     "4550_2026101711",
-    "4547_2026101620",
-    "4556_2026101710",
-    "4548_2026101710",
-    "4541_2026101713",
-    "4555_2026101712",
-    "4542_2026101709",
-    "4545_2026101713",
-    "4542_2026101713",
-    "4549_2026101714",
-    "4541_2026101709",
     "4545_2026101709",
-    "4542_2026101621",
-    "4549_2026101710",
-    "4544_2026101711",
-    "1265_2026101712",
     "4548_2026101714",
+    "4548_2026101622",
+    "4543_2026101721",
+    "4545_2026101717",
+    "4541_2026101713",
     "4556_2026101714",
-    "4547_2026101712"
+    "4543_2026101715",
+    "4541_2026101720",
+    "4549_2026101710",
+    "4544_2026101715",
+    "4542_2026101713",
+    "4549_2026101718",
+    "4548_2026101710",
+    "4542_2026101709",
+    "4544_2026101711",
+    "1265_2026101719",
+    "4556_2026101710",
+    "4549_2026101714",
+    "4545_2026101721",
+    "4555_2026101621",
+    "1265_2026101712",
+    "4547_2026101620",
+    "1182_2026101716",
+    "4543_2026101719",
+    "4542_2026101621",
+    "4549_2026101721",
+    "4541_2026101709",
+    "4555_2026101716",
+    "4555_2026101720",
+    "4550_2026101715",
+    "4550_2026101718",
+    "4547_2026101716",
+    "4547_2026101720",
+    "4545_2026101713",
+    "4547_2026101712",
+    "4555_2026101712",
+    "4542_2026101717",
+    "4556_2026101718",
+    "4550_2026101722",
+    "4548_2026101717",
+    "4543_2026101711",
+    "4544_2026101719"
   ],
-  "last_updated_str": "2026-10-17 15:11:44",
+  "last_updated_str": "2026-10-17 22:11:26",
   "last_bus_event": {
-    "plate": "4548",
-    "actualBoarded": 26,
-    "remainSeats": 45,
+    "plate": "4545",
+    "actualBoarded": 71,
+    "remainSeats": 0,
     "isDoubleDecker": true,
-    "headwayGapMin": 20.5,
-    "timeStr": "15:11",
+    "headwayGapMin": 19.9,
+    "timeStr": "22:11",
     "weekday": 5,
     "dayGroup": "weekend",
-    "timestamp": 1792217598.8976786
+    "timestamp": 1792242686.2553134
   },
   "last_upstream_bus_event": {
     "stationId": "233003021",
     "stationName": "수원대입구",
-    "plate": "4556",
-    "consumed": 17,
-    "remain": 54,
+    "plate": "4550",
+    "consumed": 10,
+    "remain": 61,
     "isDoubleDecker": true,
-    "timeStr": "14:53",
+    "timeStr": "22:11",
     "dayGroup": "weekend"
   }
 }

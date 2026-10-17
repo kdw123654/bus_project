@@ -5,14 +5,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>7790 실시간 노선도 & 스마트 통학 길찾기</title>
-  <link rel="manifest" href="/static/manifest.json">
+  <link rel="manifest" href="/static/manifest.json?v=2">
   <meta name="theme-color" content="#2563eb">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="7790 XAI">
-  <link rel="apple-touch-icon" href="/static/icon-192.png">
-  <link rel="icon" type="image/png" href="/static/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icon-192.png?v=2">
+  <link rel="icon" type="image/png" href="/static/icon-192.png?v=2">
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Microsoft Clarity 통계 & 세션 리플레이 (프로젝트 ID: yxh0esxtcn) -->
   <script type="text/javascript">
@@ -63,6 +63,12 @@
     .no-scrollbar {
       -ms-overflow-style: none;
       scrollbar-width: none;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .animate-spin {
+        animation-duration: 6s !important;
+      }
     }
   </style>
 </head>
@@ -173,9 +179,11 @@
             class="text-[10.5px] sm:text-[11px] bg-blue-50 text-blue-600 font-bold px-2 py-1.5 rounded-full border border-blue-200 truncate max-w-[85px] whitespace-nowrap flex-shrink-0">
             사당역 9출
           </button>
-          <button onclick="fetchBusData()" id="refreshBtn"
-            class="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-600 flex-shrink-0">
-            🔄
+          <button onclick="fetchBusData()" id="refreshBtn" aria-label="새로고침"
+            class="w-7 h-7 rounded-full border border-gray-200 bg-gray-50 hover:bg-gray-100 active:scale-95 flex items-center justify-center text-gray-500 hover:text-gray-700 transition flex-shrink-0">
+            <svg id="refreshIcon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
           </button>
         </div>
       </header>
@@ -269,8 +277,10 @@
           <span class="text-[10px] text-gray-400 font-normal ml-1 flex-shrink-0" id="xaiUpdateTime">15초 자동 갱신</span>
         </div>
         <button onclick="fetchXaiData(false)" id="xaiRefreshBtn"
-          class="flex-shrink-0 ml-2 py-1 px-2.5 rounded-full border border-indigo-200 bg-white hover:bg-indigo-50 text-indigo-700 text-[11px] font-bold flex items-center space-x-1 shadow-xs transition active:scale-95">
-          <span id="xaiRefreshIcon" class="inline-block text-xs">🔄</span>
+          class="flex-shrink-0 ml-2 py-1 px-2.5 rounded-full border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 text-[11px] font-bold flex items-center space-x-1 shadow-xs transition active:scale-95">
+          <svg id="xaiRefreshIcon" class="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
           <span>새로고침</span>
         </button>
       </div>
@@ -615,12 +625,29 @@
       }
     }
 
+    // 새로고침 버튼 회전 모션 보장 헬퍼 (캐시 응답 시에도 최소 550ms 회전 유지)
+    function stopRefreshSpin(el, startTime) {
+      if (!el) return;
+      const elapsed = Date.now() - startTime;
+      const minSpinMs = 550;
+      if (elapsed >= minSpinMs) {
+        el.classList.remove("animate-spin");
+      } else {
+        setTimeout(() => el.classList.remove("animate-spin"), minSpinMs - elapsed);
+      }
+    }
+
     // ⭐ XAI (Explainable AI) 및 학우 실시간 대기열 데이터 로드 및 시각화 (15초 주기 갱신)
     async function fetchXaiData(isSilent = false) {
       const requestId = ++currentXaiRequestId;
       const container = document.getElementById("xaiContent");
       const refreshIcon = document.getElementById("xaiRefreshIcon");
-      if (refreshIcon) refreshIcon.classList.add("animate-spin");
+      const spinStart = Date.now();
+      if (refreshIcon) {
+        refreshIcon.classList.remove("animate-spin");
+        void refreshIcon.offsetWidth;
+        refreshIcon.classList.add("animate-spin");
+      }
 
       if (!isSilent) {
         container.innerHTML = `
@@ -640,12 +667,12 @@
 
         // 사용자가 다른 정류장을 빠르게 연타했을 때 이전 응답 무시 (Race condition 방지)
         if (requestId !== currentXaiRequestId) {
-          if (refreshIcon) refreshIcon.classList.remove("animate-spin");
+          stopRefreshSpin(refreshIcon, spinStart);
           return;
         }
 
         if (!data.success) {
-          if (refreshIcon) refreshIcon.classList.remove("animate-spin");
+          stopRefreshSpin(refreshIcon, spinStart);
           container.innerHTML = `<div class="p-4 bg-rose-50 text-rose-600 rounded-xl text-xs text-center font-bold">XAI 분석 데이터를 불러올 수 없습니다.</div>`;
           return;
         }
@@ -999,7 +1026,7 @@
             </div>
           </div>
         `;
-        if (refreshIcon) refreshIcon.classList.remove("animate-spin");
+        stopRefreshSpin(refreshIcon, spinStart);
         const xaiUpdateTime = document.getElementById("xaiUpdateTime");
         if (xaiUpdateTime) {
           const now = new Date();
@@ -1007,7 +1034,7 @@
         }
 
       } catch (err) {
-        if (refreshIcon) refreshIcon.classList.remove("animate-spin");
+        stopRefreshSpin(refreshIcon, spinStart);
         container.innerHTML = `<div class="p-4 text-center text-xs text-rose-500 font-bold">XAI 데이터 통신 오류: ${err.message}</div>`;
       }
     }
@@ -1021,11 +1048,17 @@
     async function fetchBusData(autoScroll = false) {
       const requestId = ++currentBusRequestId;
       const refreshBtn = document.getElementById("refreshBtn");
+      const refreshIcon = document.getElementById("refreshIcon") || refreshBtn;
       const arrivalContainer = document.getElementById("arrivalCards");
       const timelineContainer = document.getElementById("routeTimeline");
       const updateTime = document.getElementById("updateTime");
 
-      refreshBtn.classList.add("animate-spin");
+      const spinStart = Date.now();
+      if (refreshIcon) {
+        refreshIcon.classList.remove("animate-spin");
+        void refreshIcon.offsetWidth;
+        refreshIcon.classList.add("animate-spin");
+      }
 
       try {
         const res = await fetch(`/api/buses?station_id=${selectedStationId}`);
@@ -1033,11 +1066,11 @@
 
         // 사용자가 다른 정류장을 빠르게 연타했을 때 이전 응답 무시 (Race condition 방지)
         if (requestId !== currentBusRequestId) {
-          if (refreshBtn) refreshBtn.classList.remove("animate-spin");
+          stopRefreshSpin(refreshIcon, spinStart);
           return;
         }
 
-        refreshBtn.classList.remove("animate-spin");
+        stopRefreshSpin(refreshIcon, spinStart);
 
         const now = new Date();
         updateTime.innerText = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} 갱신`;
@@ -1133,18 +1166,38 @@
           }).join("");
         }
 
+        const renderVehicleBadges = (vList) => vList.map(v => {
+          const isResv = isCharterOrReservedBus(v);
+          const badgeBorder = isResv ? "border-rose-400 bg-rose-50 text-rose-800" : "border-emerald-500 bg-emerald-50 text-emerald-800";
+          const tagBg = isResv ? "bg-rose-600 text-white" : "bg-emerald-600 text-white";
+          const tagText = isResv ? "전세" : "일반";
+
+          return `
+            <div class="flex items-center space-x-1 sm:space-x-1.5 border ${badgeBorder} px-1.5 sm:px-2 py-0.5 rounded-lg shadow-xs text-[11px] sm:text-xs font-bold whitespace-nowrap flex-shrink-0">
+              <span class="text-gray-900 font-black">${escapeHtml(v.shortPlate)}</span>
+              <span class="text-[10px] sm:text-[11px] text-gray-500">${escapeHtml(v.remainSeats)}석</span>
+              ${v.isDoubleDecker ? '<span class="text-[9px] bg-gray-200 text-gray-700 px-1 rounded font-black">2층</span>' : ''}
+              <span class="text-[9.5px] sm:text-[10px] font-black px-1.5 py-0.2 rounded-full ${tagBg}">${tagText}</span>
+            </div>
+          `;
+        }).join("");
+
         // 1. 세로선: 중심축 16px에 정확히 맞춤 (w-8 노드 중심과 100% 일치)
         let timelineHTML = `<div class="absolute left-[14px] top-4 bottom-4 w-[4px] bg-emerald-500 rounded-full z-0"></div>`;
         stations.forEach((st) => {
           const isTarget = (st.id === selectedStationId);
           const isTurn = st.isTurn;
           const isPass = st.isPass;
-          const matchedVehicles = vehicles.filter(v => v.currentStationId === st.id);
-          const hasBus = matchedVehicles.length > 0;
+          const matchedVehicles = vehicles.filter(v => (v.fromStationId || v.currentStationId) === st.id);
+          // 정류소에 실제 정차 중인 버스 (미정차 경유지가 아니면서 busPosition === '1')
+          const stoppedVehicles = matchedVehicles.filter(v => !isPass && v.busPosition === '1');
+          // 정류소를 출발하여 다음 정류소로 선로 구간을 주행 중인 버스
+          const transitVehicles = matchedVehicles.filter(v => isPass || v.busPosition !== '1');
+          const hasBus = stoppedVehicles.length > 0;
           // 2. 동그라미(노드) 처리: 버스가 있는 정류장은 동그라미 자리에 바로 버스 아이콘(🚌) 탑재!
           let nodeDot = '';
           if (hasBus) {
-            const firstBus = matchedVehicles[0];
+            const firstBus = stoppedVehicles[0];
             const isResv = isCharterOrReservedBus(firstBus);
             // 일반 버스는 빨간 원형 뱃지, 전세 버스는 로즈색 뱃지
             const busBg = isResv ? 'bg-rose-600 ring-rose-200' : 'bg-red-500 ring-red-200';
@@ -1166,21 +1219,7 @@
           // 3. 버스 상세 스펙 뱃지 (차량번호, 잔여좌석, 일반/전세 태그)
           let vehicleInfoHTML = "";
           if (hasBus) {
-            vehicleInfoHTML = matchedVehicles.map(v => {
-              const isResv = isCharterOrReservedBus(v);
-              const badgeBorder = isResv ? "border-rose-400 bg-rose-50 text-rose-800" : "border-emerald-500 bg-emerald-50 text-emerald-800";
-              const tagBg = isResv ? "bg-rose-600 text-white" : "bg-emerald-600 text-white";
-              const tagText = isResv ? "전세" : "일반";
-
-              return `
-                <div class="flex items-center space-x-1 sm:space-x-1.5 border ${badgeBorder} px-1.5 sm:px-2 py-0.5 rounded-lg shadow-xs text-[11px] sm:text-xs font-bold whitespace-nowrap flex-shrink-0">
-                  <span class="text-gray-900 font-black">${escapeHtml(v.shortPlate)}</span>
-                  <span class="text-[10px] sm:text-[11px] text-gray-500">${escapeHtml(v.remainSeats)}석</span>
-                  ${v.isDoubleDecker ? '<span class="text-[9px] bg-gray-200 text-gray-700 px-1 rounded font-black">2층</span>' : ''}
-                  <span class="text-[9.5px] sm:text-[10px] font-black px-1.5 py-0.2 rounded-full ${tagBg}">${tagText}</span>
-                </div>
-              `;
-            }).join("");
+            vehicleInfoHTML = renderVehicleBadges(stoppedVehicles);
           }
 
           // 4. 타임라인 행 렌더링: 정렬 어긋남 방지를 위해 -mx-2 제거, '회차' 뱃지는 이름 옆으로 배치하여 잘림 방지
@@ -1211,6 +1250,32 @@
               </div>
             </div>
           `;
+
+          // 5. 정류소 사이 선로 구간 주행 버스 렌더링 (기존 아이콘 및 뱃지 디자인 그대로 정류소 사이 선로에 배치)
+          if (transitVehicles.length > 0) {
+            const firstTransit = transitVehicles[0];
+            const isResv = isCharterOrReservedBus(firstTransit);
+            const busBg = isResv ? 'bg-rose-600 ring-rose-200' : 'bg-red-500 ring-red-200';
+            const transitInfoHTML = renderVehicleBadges(transitVehicles);
+
+            timelineHTML += `
+              <div class="relative flex items-center py-1 z-10 -my-1">
+                <!-- 좌측: 정류소 사이 선로(세로선 중심 16px) 위의 버스 아이콘 -->
+                <div class="w-8 flex-shrink-0 flex items-center justify-center z-10">
+                  <div class="w-7 h-7 rounded-full ${busBg} text-white shadow-md ring-4 flex items-center justify-center text-xs z-20 bus-pulse">
+                    🚌
+                  </div>
+                </div>
+
+                <!-- 우측: 버스 번호 및 좌석 뱃지 -->
+                <div class="flex-1 ml-2 flex justify-end items-center min-w-0 pr-2">
+                  <div class="flex-shrink-0 flex flex-col items-end space-y-1">
+                    ${transitInfoHTML}
+                  </div>
+                </div>
+              </div>
+            `;
+          }
         });
 
         timelineContainer.innerHTML = timelineHTML;
@@ -1223,11 +1288,11 @@
 
       } catch (err) {
         if (requestId !== currentBusRequestId) {
-          if (refreshBtn) refreshBtn.classList.remove("animate-spin");
+          stopRefreshSpin(refreshIcon, spinStart);
           return;
         }
         console.error("데이터 로드 오류:", err);
-        if (refreshBtn) refreshBtn.classList.remove("animate-spin");
+        stopRefreshSpin(refreshIcon, spinStart);
         if (arrivalContainer) {
           arrivalContainer.innerHTML = `
             <div class="p-3.5 bg-amber-50 rounded-xl border border-amber-200 text-center space-y-1.5">
