@@ -5,6 +5,7 @@ import time
 import threading
 import datetime
 from typing import Optional, Dict, Any, Tuple, List, Set
+from core.config import get_kst_now
 
 try:
     import numpy as np
@@ -113,7 +114,9 @@ class DayGroupState:
             "within_3_count": self.within_3_count,
             "eval_count": self.eval_count,
             "bucket_stats": self.bucket_stats,
-            "last_bus_event": self.last_bus_event
+            "last_bus_event": self.last_bus_event,
+            "history_X": [[round(float(v), 5) for v in row] for row in self.history_X[-500:]],
+            "history_y": [round(float(y), 4) for y in self.history_y[-500:]]
         }
 
     def from_dict(self, d: Dict[str, Any]):
@@ -129,6 +132,24 @@ class DayGroupState:
         self.eval_count = int(d.get("eval_count", 0))
         self.bucket_stats = d.get("bucket_stats", {})
         self.last_bus_event = d.get("last_bus_event", None)
+
+        raw_X = d.get("history_X", [])
+        raw_y = d.get("history_y", [])
+        if isinstance(raw_X, list) and isinstance(raw_y, list) and len(raw_X) == len(raw_y):
+            self.history_X = [[float(v) for v in row] for row in raw_X if len(row) == self.num_features]
+            self.history_y = [float(y) for y in raw_y[:len(self.history_X)]]
+        else:
+            self.history_X = []
+            self.history_y = []
+
+        self.sklearn_ridge = None
+        if HAS_SKLEARN and len(self.history_y) >= 15 and len(self.history_X) == len(self.history_y):
+            try:
+                ridge = Ridge(alpha=2.0)
+                ridge.fit(np.array(self.history_X), np.array(self.history_y))
+                self.sklearn_ridge = ridge
+            except Exception:
+                self.sklearn_ridge = None
 
 
 class SadangOnlineLearner:
@@ -163,7 +184,7 @@ class SadangOnlineLearner:
 
     def _get_current_group(self, now_dt: Optional[datetime.datetime] = None) -> DayGroupState:
         if now_dt is None:
-            now_dt = datetime.datetime.now()
+            now_dt = get_kst_now()
         eff_weekday, eff_time = get_effective_day_and_time(now_dt.weekday(), now_dt.hour, now_dt.minute)
         group_key = get_day_group(eff_weekday, eff_time)
         return self.groups[group_key]
@@ -627,6 +648,14 @@ class SadangOnlineLearner:
                 self.last_updated_str = state.get("last_updated_str", "복원 완료")
                 self.last_bus_event = state.get("last_bus_event", None)
                 self.last_upstream_bus_event = state.get("last_upstream_bus_event", None)
+
+                # 구버전 JSON에 history_X/history_y가 누락된 경우 CSV로부터 1회 재구축하여 Ridge 모델 일관성 보장
+                needs_history_backfill = any(
+                    g.learned_buses > 0 and len(g.history_y) == 0
+                    for g in self.groups.values()
+                )
+                if needs_history_backfill and os.path.exists(os.path.join(DATA_DIR, "sadang_telemetry.csv")):
+                    self.rebuild_from_csvs()
             else:
                 # 구버전 단일 모델 포맷 -> CSV 텔레메트리 기반으로 3분할 재구축
                 self.rebuild_from_csvs()

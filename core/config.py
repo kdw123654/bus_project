@@ -6,6 +6,8 @@ load_dotenv()
 
 # 공공데이터포털 및 GBIS API 키
 API_KEY = os.getenv("BUS_API_KEY", "")
+ADMIN_API_TOKEN = os.getenv("ADMIN_API_TOKEN", "")
+REMOTE_SYNC_URL = os.getenv("REMOTE_SYNC_URL", "https://bus-project-e9nd.onrender.com")
 
 # 대한민국 표준시(KST, UTC+9) 보증 헬퍼 (클라우드/도커 배포 환경에서도 KST 기준 동작)
 KST = datetime.timezone(datetime.timedelta(hours=9))

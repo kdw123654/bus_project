@@ -1,9 +1,10 @@
 import os
+import re
 import datetime
 import time
 import json
 import threading
-from typing import Literal
+from typing import Literal, Tuple
 import requests
 import urllib3
 from urllib.parse import quote
@@ -15,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from core.config import (
     API_KEY,
+    ADMIN_API_TOKEN,
+    REMOTE_SYNC_URL,
     KST,
     get_kst_now,
     STATION_ID,
@@ -31,15 +34,21 @@ from core.config import (
     TIMETABLE_INFO
 )
 from services.gbis_client import (
+    HTTP_SESSION,
     is_charter_or_reserved_bus,
     fetch_gbis_route_cached,
+    parse_gbis_realtime_vehicles,
     fetch_full_route_stations,
     calc_realtime_traffic_delays
 )
 from services.online_learner import online_learner, is_friday_night_window
-from services.telemetry_logger import process_live_vehicles_for_learning
+from services.telemetry_logger import process_live_vehicles_for_learning, merge_telemetry_csv
 
 FILE_IO_LOCK = threading.Lock()
+_LOCK_BUS_ARRIVALS = threading.Lock()
+_LOCK_XAI_ANALYSIS = threading.Lock()
+_ADMIN_ACTION_LOCK = threading.Lock()
+_LAST_ADMIN_ACTION_TS = 0.0
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -73,7 +82,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 CACHED_STATIONS = []
 
-import time
 CACHE_BUS_ARRIVALS = {}      
 CACHE_XAI_ANALYSIS = {}     
 CROWD_REPORT_IP_RATE_LIMIT = {}  
@@ -147,14 +155,46 @@ def apply_prediction_deadband_lock(
 
 
 def get_real_client_ip(request: Request) -> str:
+    """리버스 프록시(Render 등) 환경을 고려하여 스푸핑을 방어한 실제 클라이언트 IP 추출"""
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        # 클라이언트가 임의로 앞단에 추가한 위조 헤더를 배제하기 위해 프록시가 부여한 마지막 유효 홉 사용
+        hops = [ip.strip() for ip in forwarded.split(",") if ip.strip()]
+        if hops:
+            candidate = hops[-1] if len(hops) > 1 else hops[0]
+            if re.match(r"^[0-9a-fA-F:.]{3,45}$", candidate):
+                return candidate
     real_ip = request.headers.get("x-real-ip")
     if real_ip:
-        return real_ip.strip()
+        clean_real = real_ip.strip()
+        if re.match(r"^[0-9a-fA-F:.]{3,45}$", clean_real):
+            return clean_real
     return request.client.host if request.client else "unknown"
 
+
+def _enrich_cached_bus_response(station_id: str, cached_data: dict) -> dict:
+    """캐시된 버스 도착 응답에 실시간 제보 및 최신 XAI 좌석 예측을 동적 결합"""
+    res = dict(cached_data)
+    crowd_now = get_crowd_summary(station_id=station_id)
+    res["crowdData"] = crowd_now
+    if station_id in STATION_XAI_PROFILES and res.get("arrivingBuses"):
+        try:
+            exps, _ = calculate_bus_predictions(station_id, res["arrivingBuses"], res.get("vehicles", []), crowd_now)
+            exp_map = {e["shortPlate"]: e for e in exps}
+            updated_arr = []
+            for b in res["arrivingBuses"]:
+                b_copy = dict(b)
+                short = b_copy.get("shortPlate")
+                if short in exp_map:
+                    b_copy["predictedSeatRange"] = exp_map[short].get("predictedSeatRange")
+                    b_copy["boardingStatus"] = exp_map[short].get("boardingStatus")
+                    b_copy["boardingProbability"] = exp_map[short].get("boardingProb")
+                    b_copy["probColor"] = exp_map[short].get("probColor")
+                updated_arr.append(b_copy)
+            res["arrivingBuses"] = updated_arr
+        except Exception:
+            pass
+    return res
 
 
 @app.get("/")
@@ -169,239 +209,192 @@ def get_bus_arrivals(station_id: str = Query("119000302")):
 
     cached = CACHE_BUS_ARRIVALS.get(station_id)
     if cached and (now - cached["timestamp"] < BUS_CACHE_TTL):
-        res = dict(cached["data"])
-        crowd_now = get_crowd_summary(station_id=station_id)
-        res["crowdData"] = crowd_now
-        if station_id in STATION_XAI_PROFILES and res.get("arrivingBuses"):
-            try:
-                exps, _ = calculate_bus_predictions(station_id, res["arrivingBuses"], res.get("vehicles", []), crowd_now)
-                exp_map = {e["shortPlate"]: e for e in exps}
-                updated_arr = []
-                for b in res["arrivingBuses"]:
-                    b_copy = dict(b)
-                    short = b_copy.get("shortPlate")
-                    if short in exp_map:
-                        b_copy["predictedSeatRange"] = exp_map[short].get("predictedSeatRange")
-                        b_copy["boardingStatus"] = exp_map[short].get("boardingStatus")
-                        b_copy["boardingProbability"] = exp_map[short].get("boardingProb")
-                        b_copy["probColor"] = exp_map[short].get("probColor")
-                    updated_arr.append(b_copy)
-                res["arrivingBuses"] = updated_arr
-            except Exception:
-                pass
-        return res
+        return _enrich_cached_bus_response(station_id, cached["data"])
 
-    if not CACHED_STATIONS:
-        CACHED_STATIONS = fetch_full_route_stations()
+    with _LOCK_BUS_ARRIVALS:
+        now = time.time()
+        cached = CACHE_BUS_ARRIVALS.get(station_id)
+        if cached and (now - cached["timestamp"] < BUS_CACHE_TTL):
+            return _enrich_cached_bus_response(station_id, cached["data"])
 
-    url_arrival = f"https://apis.data.go.kr/6410000/busarrivalservice/v2/getBusArrivalListv2?serviceKey={API_KEY}&stationId={station_id}&format=json"
+        if not CACHED_STATIONS:
+            CACHED_STATIONS = fetch_full_route_stations()
 
-    arriving_buses = []
-    live_vehicles = []
+        url_arrival = f"https://apis.data.go.kr/6410000/busarrivalservice/v2/getBusArrivalListv2?serviceKey={API_KEY}&stationId={station_id}&format=json"
 
-    # 1. 사당역 도착 정보
-    try:
-        r_arr = requests.get(url_arrival, headers=GBIS_HEADERS, timeout=4)
-        if r_arr.status_code == 200:
-            arr_data = r_arr.json()
-            bus_list = arr_data.get("response", {}).get("msgBody", {}).get("busArrivalList", [])
-            for bus in bus_list:
-                route_id = str(bus.get("routeId"))
-                route_name = str(bus.get("routeName"))
-                if route_id in [ROUTE_REGULAR_ID, ROUTE_RESERVE_ID] or "7790" in route_name:
-                    if bus.get("predictTime1"):
-                        plate = bus.get("plateNo1", "")
-                        short_plate = plate[-4:] if len(plate) >= 4 else plate
-                        is_resv, resv_reason = is_charter_or_reserved_bus(
-                            route_id=route_id,
-                            route_name=route_name,
-                            plate_no=plate,
-                            short_plate=short_plate
-                        )
-                        arriving_buses.append({
-                            "routeName": route_name,
-                            "isReserved": is_resv,
-                            "reserveReason": resv_reason,
-                            "predictTimeMin": int(bus.get("predictTime1")),
-                            "remainStations": int(bus.get("locationNo1") or 0),
-                            "remainSeats": int(bus.get("remainSeatCnt1") or 0),
-                            "plateNo": plate,
-                            "shortPlate": short_plate
-                        })
-                    if bus.get("predictTime2"):
-                        plate = bus.get("plateNo2", "")
-                        short_plate = plate[-4:] if len(plate) >= 4 else plate
-                        is_resv, resv_reason = is_charter_or_reserved_bus(
-                            route_id=route_id,
-                            route_name=route_name,
-                            plate_no=plate,
-                            short_plate=short_plate
-                        )
-                        arriving_buses.append({
-                            "routeName": route_name,
-                            "isReserved": is_resv,
-                            "reserveReason": resv_reason,
-                            "predictTimeMin": int(bus.get("predictTime2")),
-                            "remainStations": int(bus.get("locationNo2") or 0),
-                            "remainSeats": int(bus.get("remainSeatCnt2") or 0),
-                            "plateNo": plate,
-                            "shortPlate": short_plate
-                        })
-            arriving_buses.sort(key=lambda x: x["predictTimeMin"])
-    except Exception as e:
-        print(f"도착 API 오류: {e}")
+        arriving_buses = []
+        live_vehicles = []
+        live_data = {}
 
-    try:
-        live_data = fetch_gbis_route_cached()
-        v_list = live_data.get("result", {}).get("realTime", {}).get("list", [])
-        for v in v_list:
-            plate_list = v.get("busNo", [])
-            plate = plate_list[0] if plate_list else ""
-            short_plate = plate[-4:] if len(plate) >= 4 else plate
-            is_reserved, resv_reason = is_charter_or_reserved_bus(
-                route_id=ROUTE_REGULAR_ID,
-                route_name="7790",
-                plate_no=plate,
-                short_plate=short_plate,
-                reservation_flag=v.get("reservation", "")
-            )
-            from_st = str(v.get("fromStationId") or "")
-            to_st = str(v.get("toStationId") or "")
-            pos_raw = v.get("busPosition")
-            bus_pos = ""
-            if isinstance(pos_raw, list) and pos_raw:
-                bus_pos = str(pos_raw[0]).strip()
-            elif isinstance(pos_raw, str):
-                bus_pos = pos_raw.strip()
-            
-            target_station = from_st or to_st
-            
-            live_vehicles.append({
-                "plateNo": plate,
-                "shortPlate": short_plate,
-                "remainSeats": int(v.get("seat") or 0),
-                "isReserved": is_reserved,
-                "isDoubleDecker": (v.get("lowPlate") == "2"),
-                "currentStationId": target_station,
-                "fromStationId": from_st,
-                "toStationId": to_st,
-                "busPosition": bus_pos,
-                "dir": v.get("busDirList", [""])[0]
-            })
-    except Exception as e:
-        print(f"차량 API 오류: {e}")
-
-    for ab in arriving_buses:
-        short = ab.get("shortPlate")
-        matched = next((v for v in live_vehicles if v.get("shortPlate") == short), None)
-        if matched:
-            ab["isDoubleDecker"] = matched.get("isDoubleDecker", False)
-        elif "isDoubleDecker" not in ab:
-            ab["isDoubleDecker"] = False
-
-    max_track_count = 3 if str(station_id) == "119000302" else 2
-    if len(arriving_buses) < max_track_count and live_vehicles:
+        # 1. 사당역 도착 정보 (HTTP_SESSION 커넥션 풀 재사용)
         try:
-            est = live_data.get("result", {}).get("estimateTime", [])
-            order_map = {item['stationId']: int(item['staOrder']) for item in est}
-            order_ptts = {int(item['staOrder']): int(item['ptts']) for item in est}
-            target_order = order_map.get(station_id)
-
-            if target_order:
-                target_dir = 'D' if target_order >= 33 else 'U'
-                existing_shorts = {b.get("shortPlate") for b in arriving_buses}
-                candidates = []
-
-                for v in live_vehicles:
-                    v_short = v.get("shortPlate", "")
-                    if v_short in existing_shorts:
-                        continue
-
-                    v_dir = v.get("dir", "")
-                    to_id = v.get("currentStationId", "")
-                    v_order = order_map.get(to_id)
-                    if not v_order:
-                        continue
-
-                    if str(station_id) == "119000302":
-                        if (v_dir == "U" and v_order <= 33) or (v_dir == "D" and v_order == 32):
-                            rem_stops = max(1, 33 - v_order)
-                            ptts_sum = sum(order_ptts.get(o, 60) for o in range(v_order, 33))
-                            mins = max(1, round(ptts_sum / 60))
-                            candidates.append({
-                                "routeName": "7790(예약)" if v["isReserved"] else "7790",
-                                "isReserved": v["isReserved"],
-                                "predictTimeMin": mins,
-                                "remainStations": rem_stops,
-                                "remainSeats": v["remainSeats"],
-                                "plateNo": v["plateNo"],
-                                "shortPlate": v["shortPlate"],
-                                "isDoubleDecker": v.get("isDoubleDecker", False)
+            r_arr = HTTP_SESSION.get(url_arrival, timeout=4)
+            if r_arr.status_code == 200:
+                arr_data = r_arr.json()
+                bus_list = arr_data.get("response", {}).get("msgBody", {}).get("busArrivalList", [])
+                for bus in bus_list:
+                    route_id = str(bus.get("routeId"))
+                    route_name = str(bus.get("routeName"))
+                    if route_id in [ROUTE_REGULAR_ID, ROUTE_RESERVE_ID] or "7790" in route_name:
+                        if bus.get("predictTime1"):
+                            plate = bus.get("plateNo1", "")
+                            short_plate = plate[-4:] if len(plate) >= 4 else plate
+                            is_resv, resv_reason = is_charter_or_reserved_bus(
+                                route_id=route_id,
+                                route_name=route_name,
+                                plate_no=plate,
+                                short_plate=short_plate
+                            )
+                            arriving_buses.append({
+                                "routeName": route_name,
+                                "isReserved": is_resv,
+                                "reserveReason": resv_reason,
+                                "predictTimeMin": int(bus.get("predictTime1")),
+                                "remainStations": int(bus.get("locationNo1") or 0),
+                                "remainSeats": int(bus.get("remainSeatCnt1") or 0),
+                                "plateNo": plate,
+                                "shortPlate": short_plate
                             })
-                    else:
-                        if v_dir == target_dir and v_order <= target_order:
-                            rem_stops = max(1, target_order - v_order)
-                            ptts_sum = sum(order_ptts.get(o, 60) for o in range(v_order, target_order))
-                            mins = max(1, round(ptts_sum / 60))
-                            candidates.append({
-                                "routeName": "7790(예약)" if v["isReserved"] else "7790",
-                                "isReserved": v["isReserved"],
-                                "predictTimeMin": mins,
-                                "remainStations": rem_stops,
-                                "remainSeats": v["remainSeats"],
-                                "plateNo": v["plateNo"],
-                                "shortPlate": v["shortPlate"],
-                                "isDoubleDecker": v.get("isDoubleDecker", False)
+                        if bus.get("predictTime2"):
+                            plate = bus.get("plateNo2", "")
+                            short_plate = plate[-4:] if len(plate) >= 4 else plate
+                            is_resv, resv_reason = is_charter_or_reserved_bus(
+                                route_id=route_id,
+                                route_name=route_name,
+                                plate_no=plate,
+                                short_plate=short_plate
+                            )
+                            arriving_buses.append({
+                                "routeName": route_name,
+                                "isReserved": is_resv,
+                                "reserveReason": resv_reason,
+                                "predictTimeMin": int(bus.get("predictTime2")),
+                                "remainStations": int(bus.get("locationNo2") or 0),
+                                "remainSeats": int(bus.get("remainSeatCnt2") or 0),
+                                "plateNo": plate,
+                                "shortPlate": short_plate
                             })
-
-                candidates.sort(key=lambda x: x["predictTimeMin"])
-                needed = max_track_count - len(arriving_buses)
-                arriving_buses.extend(candidates[:needed])
                 arriving_buses.sort(key=lambda x: x["predictTimeMin"])
-        except Exception as e_fb:
-            print(f"GBIS 실시간 3대 추적/폴백 산출 오류: {e_fb}")
+        except Exception as e:
+            print(f"도착 API 오류: {e}")
 
-    crowd_summary_data = get_crowd_summary(station_id=station_id)
-
-    if live_vehicles:
         try:
-            sadang_c_status = (
-                crowd_summary_data.get("status", "none")
-                if str(station_id) == "119000302"
-                else get_crowd_summary(station_id="119000302").get("status", "none")
-            )
-            process_live_vehicles_for_learning(
-                live_vehicles=live_vehicles,
-                now_dt=get_kst_now(),
-                heuristic_prior_fn=lambda: estimate_sadang_waiters_by_time(apply_online_ml=False),
-                crowd_status=sadang_c_status
-            )
-        except Exception as e_learn:
-            print(f"실시간 차량 온라인 학습 트리거 오류: {e_learn}")
+            live_data = fetch_gbis_route_cached()
+            live_vehicles = parse_gbis_realtime_vehicles(live_data)
+        except Exception as e:
+            print(f"차량 API 오류: {e}")
 
-    if station_id in STATION_XAI_PROFILES and arriving_buses:
-        try:
-            exps, _ = calculate_bus_predictions(station_id, arriving_buses, live_vehicles, crowd_summary_data)
-            exp_map = {e["shortPlate"]: e for e in exps}
-            for ab in arriving_buses:
-                short = ab.get("shortPlate")
-                if short in exp_map:
-                    ab["predictedSeatRange"] = exp_map[short].get("predictedSeatRange")
-                    ab["boardingStatus"] = exp_map[short].get("boardingStatus")
-                    ab["boardingProbability"] = exp_map[short].get("boardingProb")
-                    ab["probColor"] = exp_map[short].get("probColor")
-        except Exception as e_xai_attach:
-            print(f"XAI 예측 도착 버스 부착 오류: {e_xai_attach}")
+        for ab in arriving_buses:
+            short = ab.get("shortPlate")
+            matched = next((v for v in live_vehicles if v.get("shortPlate") == short), None)
+            if matched:
+                ab["isDoubleDecker"] = matched.get("isDoubleDecker", False)
+            elif "isDoubleDecker" not in ab:
+                ab["isDoubleDecker"] = False
 
-    res_data = {
-        "success": True,
-        "stations": CACHED_STATIONS,
-        "arrivingBuses": arriving_buses,
-        "vehicles": live_vehicles,
-        "crowdData": crowd_summary_data
-    }
-    CACHE_BUS_ARRIVALS[station_id] = {"data": res_data, "timestamp": now}
-    return res_data
+        max_track_count = 3 if str(station_id) == "119000302" else 2
+        if len(arriving_buses) < max_track_count and live_vehicles:
+            try:
+                est = live_data.get("result", {}).get("estimateTime", [])
+                order_map = {item['stationId']: int(item['staOrder']) for item in est}
+                order_ptts = {int(item['staOrder']): int(item['ptts']) for item in est}
+                target_order = order_map.get(station_id)
+
+                if target_order:
+                    target_dir = 'D' if target_order >= 33 else 'U'
+                    existing_shorts = {b.get("shortPlate") for b in arriving_buses}
+                    candidates = []
+
+                    for v in live_vehicles:
+                        v_short = v.get("shortPlate", "")
+                        if v_short in existing_shorts:
+                            continue
+
+                        v_dir = v.get("dir", "")
+                        to_id = v.get("currentStationId", "")
+                        v_order = order_map.get(to_id)
+                        if not v_order:
+                            continue
+
+                        if str(station_id) == "119000302":
+                            if (v_dir == "U" and v_order <= 33) or (v_dir == "D" and v_order == 32):
+                                rem_stops = max(1, 33 - v_order)
+                                ptts_sum = sum(order_ptts.get(o, 60) for o in range(v_order, 33))
+                                mins = max(1, round(ptts_sum / 60))
+                                candidates.append({
+                                    "routeName": "7790(예약)" if v["isReserved"] else "7790",
+                                    "isReserved": v["isReserved"],
+                                    "predictTimeMin": mins,
+                                    "remainStations": rem_stops,
+                                    "remainSeats": v["remainSeats"],
+                                    "plateNo": v["plateNo"],
+                                    "shortPlate": v["shortPlate"],
+                                    "isDoubleDecker": v.get("isDoubleDecker", False)
+                                })
+                        else:
+                            if v_dir == target_dir and v_order <= target_order:
+                                rem_stops = max(1, target_order - v_order)
+                                ptts_sum = sum(order_ptts.get(o, 60) for o in range(v_order, target_order))
+                                mins = max(1, round(ptts_sum / 60))
+                                candidates.append({
+                                    "routeName": "7790(예약)" if v["isReserved"] else "7790",
+                                    "isReserved": v["isReserved"],
+                                    "predictTimeMin": mins,
+                                    "remainStations": rem_stops,
+                                    "remainSeats": v["remainSeats"],
+                                    "plateNo": v["plateNo"],
+                                    "shortPlate": v["shortPlate"],
+                                    "isDoubleDecker": v.get("isDoubleDecker", False)
+                                })
+
+                    candidates.sort(key=lambda x: x["predictTimeMin"])
+                    needed = max_track_count - len(arriving_buses)
+                    arriving_buses.extend(candidates[:needed])
+                    arriving_buses.sort(key=lambda x: x["predictTimeMin"])
+            except Exception as e_fb:
+                print(f"GBIS 실시간 3대 추적/폴백 산출 오류: {e_fb}")
+
+        crowd_summary_data = get_crowd_summary(station_id=station_id)
+
+        if live_vehicles:
+            try:
+                sadang_c_status = (
+                    crowd_summary_data.get("status", "none")
+                    if str(station_id) == "119000302"
+                    else get_crowd_summary(station_id="119000302").get("status", "none")
+                )
+                process_live_vehicles_for_learning(
+                    live_vehicles=live_vehicles,
+                    now_dt=get_kst_now(),
+                    heuristic_prior_fn=lambda: estimate_sadang_waiters_by_time(apply_online_ml=False),
+                    crowd_status=sadang_c_status
+                )
+            except Exception as e_learn:
+                print(f"실시간 차량 온라인 학습 트리거 오류: {e_learn}")
+
+        if station_id in STATION_XAI_PROFILES and arriving_buses:
+            try:
+                exps, _ = calculate_bus_predictions(station_id, arriving_buses, live_vehicles, crowd_summary_data)
+                exp_map = {e["shortPlate"]: e for e in exps}
+                for ab in arriving_buses:
+                    short = ab.get("shortPlate")
+                    if short in exp_map:
+                        ab["predictedSeatRange"] = exp_map[short].get("predictedSeatRange")
+                        ab["boardingStatus"] = exp_map[short].get("boardingStatus")
+                        ab["boardingProbability"] = exp_map[short].get("boardingProb")
+                        ab["probColor"] = exp_map[short].get("probColor")
+            except Exception as e_xai_attach:
+                print(f"XAI 예측 도착 버스 부착 오류: {e_xai_attach}")
+
+        res_data = {
+            "success": True,
+            "stations": CACHED_STATIONS,
+            "arrivingBuses": arriving_buses,
+            "vehicles": live_vehicles,
+            "crowdData": crowd_summary_data
+        }
+        CACHE_BUS_ARRIVALS[station_id] = {"data": res_data, "timestamp": time.time()}
+        return res_data
 
 
 def _background_telemetry_learning_loop():
@@ -411,41 +404,8 @@ def _background_telemetry_learning_loop():
             now_dt = get_kst_now()
             if now_dt.hour >= 5 or now_dt.hour < 2:
                 live_data = fetch_gbis_route_cached()
-                v_list = live_data.get("result", {}).get("realTime", {}).get("list", [])
-                if v_list:
-                    parsed_vehicles = []
-                    for v in v_list:
-                        plate_list = v.get("busNo", [])
-                        plate = plate_list[0] if plate_list else ""
-                        short_plate = plate[-4:] if len(plate) >= 4 else plate
-                        is_resv, _ = is_charter_or_reserved_bus(
-                            route_id=ROUTE_REGULAR_ID,
-                            route_name="7790",
-                            plate_no=plate,
-                            short_plate=short_plate,
-                            reservation_flag=v.get("reservation", "")
-                        )
-                        from_st = str(v.get("fromStationId") or "")
-                        to_st = str(v.get("toStationId") or "")
-                        pos_raw = v.get("busPosition")
-                        bus_pos = ""
-                        if isinstance(pos_raw, list) and pos_raw:
-                            bus_pos = str(pos_raw[0]).strip()
-                        elif isinstance(pos_raw, str):
-                            bus_pos = pos_raw.strip()
-                        target_st = from_st or to_st
-                        parsed_vehicles.append({
-                            "plateNo": plate,
-                            "shortPlate": short_plate,
-                            "remainSeats": int(v.get("seat") or 0),
-                            "isReserved": is_resv,
-                            "isDoubleDecker": (v.get("lowPlate") == "2"),
-                            "currentStationId": target_st,
-                            "fromStationId": from_st,
-                            "toStationId": to_st,
-                            "busPosition": bus_pos,
-                            "dir": v.get("busDirList", [""])[0]
-                        })
+                parsed_vehicles = parse_gbis_realtime_vehicles(live_data)
+                if parsed_vehicles:
                     sadang_c = get_crowd_summary(station_id="119000302").get("status", "none")
                     process_live_vehicles_for_learning(
                         live_vehicles=parsed_vehicles,
@@ -543,9 +503,11 @@ def report_crowd(
     else:
         dynamic_cooldown = max(120, min(target_eta_min * 60, 600))  
     client_ip = get_real_client_ip(request)
-    client_uuid = request.headers.get("x-client-id", "").strip()
-    user_id = client_uuid if client_uuid else client_ip
+    raw_uuid = request.headers.get("x-client-id", "").strip()
+    client_uuid = raw_uuid if re.match(r"^[a-zA-Z0-9_-]{8,64}$", raw_uuid) else ""
+    user_id = f"{client_ip}:{client_uuid}" if client_uuid else client_ip
     cooldown_key = f"{user_id}_{station_id}"
+    ip_burst_key = f"ipburst_{client_ip}_{station_id}"
 
     with CROWD_STATE_LOCK:
         expired_ips = [ip for ip, hist in list(CROWD_REPORT_IP_RATE_LIMIT.items()) if not hist or (now - hist[-1] >= 60)]
@@ -558,6 +520,17 @@ def report_crowd(
                 "success": False,
                 "message": "교내 네트워크에서 일시적으로 제보가 집중되었습니다. 1분 후 다시 시도해 주세요.",
                 "remainCooldown": 30,
+                "stationId": station_id
+            }
+
+        # 동일 IP에서 x-client-id를 랜덤 변조하여 연속 호출하는 스크립트 어뷰징 방어 (정류장당 최소 15초 간격)
+        ip_burst_rec = CROWD_REPORT_IP_COOLDOWN.get(ip_burst_key)
+        if isinstance(ip_burst_rec, dict) and (now - ip_burst_rec.get("time", 0) < 15):
+            wait_sec = max(1, int(15 - (now - ip_burst_rec.get("time", 0))))
+            return {
+                "success": False,
+                "message": f"동일 네트워크 연속 제보 보호 중입니다. {wait_sec}초 후 다시 시도해 주세요.",
+                "remainCooldown": wait_sec,
                 "stationId": station_id
             }
 
@@ -598,6 +571,7 @@ def report_crowd(
             "targetEta": target_eta_min
         })
         CROWD_REPORT_IP_COOLDOWN[cooldown_key] = {"time": now, "duration": dynamic_cooldown}
+        CROWD_REPORT_IP_COOLDOWN[ip_burst_key] = {"time": now, "duration": 15}
 
     save_crowd_data_to_disk()
 
@@ -1409,46 +1383,57 @@ def get_xai_analysis(station_id: str = Query("119000302")):
         res["onlineLearning"] = online_learner.get_status_summary()
         return res
 
+    # _LOCK_BUS_ARRIVALS와의 교착(Deadlock) 방지를 위해 버스 데이터는 먼저 조회
     bus_data = get_bus_arrivals(station_id=station_id)
-    arriving = bus_data.get("arrivingBuses", [])
-    vehicles = bus_data.get("vehicles", [])
-    crowd_info = get_crowd_summary(station_id=station_id)
 
-    profile = STATION_XAI_PROFILES.get(station_id, STATION_XAI_PROFILES["119000302"])
-    is_down = (profile["dir"] == "DOWN")
+    with _LOCK_XAI_ANALYSIS:
+        now = time.time()
+        cached = CACHE_XAI_ANALYSIS.get(station_id)
+        if cached and (now - cached["timestamp"] < XAI_CACHE_TTL):
+            res = dict(cached["data"])
+            res["crowdData"] = get_crowd_summary(station_id=station_id)
+            res["onlineLearning"] = online_learner.get_status_summary()
+            return res
 
-    realtime_delays = calc_realtime_traffic_delays(direction=profile["dir"])
+        arriving = bus_data.get("arrivingBuses", [])
+        vehicles = bus_data.get("vehicles", [])
+        crowd_info = get_crowd_summary(station_id=station_id)
 
-    bus_explanations, is_hyohaeng_surge = calculate_bus_predictions(
-        station_id=station_id,
-        arriving=arriving,
-        vehicles=vehicles,
-        crowd_info=crowd_info
-    )
+        profile = STATION_XAI_PROFILES.get(station_id, STATION_XAI_PROFILES["119000302"])
+        is_down = (profile["dir"] == "DOWN")
 
-    ml_summary = online_learner.get_status_summary()
-    model_meta = {
-        "modelName": "7790 스마트 통학 지원 AI",
-        "algorithm": "전 요일·전 시간대 실시간 온라인 학습(Online-ML) + 불감대 좌석 예측",
-        "dataSources": ["경기도 버스 실시간 GPS", "기상청 실시간 기상/노면 데이터", f"{profile['name']} 학우 실시간 제보 & {'등교·퇴근·심야 귀가 패턴' if is_down else '하교 통학 패턴'}"],
-        "totalActiveBuses": len(vehicles),
-        "confidenceLevel": "95% 착석 신뢰 보증",
-        "modelVersion": "v3.2-OnlineML",
-        "onlineLearning": ml_summary
-    }
+        realtime_delays = calc_realtime_traffic_delays(direction=profile["dir"])
 
-    res_data = {
-        "success": True,
-        "stationMeta": profile,
-        "busExplanations": bus_explanations,
-        "delayFactors": realtime_delays,
-        "modelMeta": model_meta,
-        "crowdData": crowd_info,
-        "onlineLearning": ml_summary,
-        "isHyohaengSurge": is_hyohaeng_surge if not is_down else False
-    }
-    CACHE_XAI_ANALYSIS[station_id] = {"data": res_data, "timestamp": now}
-    return res_data
+        bus_explanations, is_hyohaeng_surge = calculate_bus_predictions(
+            station_id=station_id,
+            arriving=arriving,
+            vehicles=vehicles,
+            crowd_info=crowd_info
+        )
+
+        ml_summary = online_learner.get_status_summary()
+        model_meta = {
+            "modelName": "7790 스마트 통학 지원 AI",
+            "algorithm": "전 요일·전 시간대 실시간 온라인 학습(Online-ML) + 불감대 좌석 예측",
+            "dataSources": ["경기도 버스 실시간 GPS", "기상청 실시간 기상/노면 데이터", f"{profile['name']} 학우 실시간 제보 & {'등교·퇴근·심야 귀가 패턴' if is_down else '하교 통학 패턴'}"],
+            "totalActiveBuses": len(vehicles),
+            "confidenceLevel": "95% 착석 신뢰 보증",
+            "modelVersion": "v3.2-OnlineML",
+            "onlineLearning": ml_summary
+        }
+
+        res_data = {
+            "success": True,
+            "stationMeta": profile,
+            "busExplanations": bus_explanations,
+            "delayFactors": realtime_delays,
+            "modelMeta": model_meta,
+            "crowdData": crowd_info,
+            "onlineLearning": ml_summary,
+            "isHyohaengSurge": is_hyohaeng_surge if not is_down else False
+        }
+        CACHE_XAI_ANALYSIS[station_id] = {"data": res_data, "timestamp": time.time()}
+        return res_data
 
 
 @app.get("/api/ml-status")
@@ -1459,77 +1444,63 @@ def get_ml_status():
         "onlineLearning": online_learner.get_status_summary()
     }
 
-def _merge_csv_file(file_path: str, remote_text: str, key_fn, sort_fn):
-    import csv, io
-    rows = []
-    seen = set()
-    header = None
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, "r", encoding="utf-8-sig") as f:
-                reader = csv.reader(f)
-                header = next(reader, None)
-                for r in reader:
-                    if not r:
-                        continue
-                    k = key_fn(r)
-                    if k not in seen:
-                        seen.add(k)
-                        rows.append(r)
-        except Exception:
-            pass
-    remote_reader = csv.reader(io.StringIO(remote_text))
-    remote_header = next(remote_reader, None)
-    if not header:
-        header = remote_header
-    for r in remote_reader:
-        if not r:
-            continue
-        try:
-            k = key_fn(r)
-            if k not in seen:
-                seen.add(k)
-                rows.append(r)
-        except Exception:
-            pass
-    rows.sort(key=sort_fn)
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.writer(f)
-        if header:
-            writer.writerow(header)
-        writer.writerows(rows)
-    return len(rows)
+
+def _verify_admin_access(request: Request, token: str = "", min_interval_sec: float = 3.0) -> Tuple[bool, str]:
+    """관리/동기화 엔드포인트 접근 제어 및 과부하(DoS) 방어 쿨다운 검증"""
+    global _LAST_ADMIN_ACTION_TS
+    client_ip = get_real_client_ip(request)
+    is_local = client_ip in ("127.0.0.1", "::1", "localhost")
+
+    if ADMIN_API_TOKEN and not is_local:
+        header_token = request.headers.get("x-admin-token", "").strip()
+        provided = header_token or (token or "").strip()
+        if provided != ADMIN_API_TOKEN:
+            return False, "관리자 인증 토큰(X-Admin-Token)이 유효하지 않습니다."
+
+    with _ADMIN_ACTION_LOCK:
+        now = time.time()
+        if not is_local and (now - _LAST_ADMIN_ACTION_TS < min_interval_sec):
+            return False, "요청이 너무 빈번합니다. 잠시 후 다시 시도해 주세요."
+        _LAST_ADMIN_ACTION_TS = now
+    return True, "ok"
+
 
 @app.post("/api/ml-reload")
-def reload_ml_model():
+def reload_ml_model(request: Request, token: str = Query("")):
     """온라인 학습 모델 및 텔레메트리 최신 상태 다시 불러오기"""
     global CACHE_XAI_ANALYSIS
+    ok, msg = _verify_admin_access(request, token=token, min_interval_sec=2.0)
+    if not ok:
+        return {"success": False, "error": msg}
+
     online_learner.load_state()
     CACHE_XAI_ANALYSIS.clear()
     return {"success": True, "onlineLearning": online_learner.get_status_summary()}
 
+
 @app.post("/api/backup/sync-render")
-def sync_from_render():
+def sync_from_render(request: Request, token: str = Query("")):
     """Render 배포 서버의 최신 텔레메트리 CSV 및 학습 데이터를 가져와 로컬과 병합 동기화"""
-    import urllib.request
     global CACHE_XAI_ANALYSIS
+    ok, msg = _verify_admin_access(request, token=token, min_interval_sec=5.0)
+    if not ok:
+        return {"success": False, "error": msg}
+
     try:
-        req = urllib.request.Request(
-            "https://bus-project-e9nd.onrender.com/api/backup/export",
-            headers={"User-Agent": "Mozilla/5.0"}
-        )
-        with urllib.request.urlopen(req, timeout=10) as res:
-            data = json.loads(res.read().decode("utf-8"))
-        
+        headers = {"User-Agent": "Mozilla/5.0"}
+        if ADMIN_API_TOKEN:
+            headers["X-Admin-Token"] = ADMIN_API_TOKEN
+        resp = HTTP_SESSION.get(f"{REMOTE_SYNC_URL.rstrip('/')}/api/backup/export", headers=headers, timeout=10)
+        data = resp.json()
+
         remote_sadang = data.get("sadang_csv", "")
         if remote_sadang:
-            _merge_csv_file("data/sadang_telemetry.csv", remote_sadang, lambda r: (r[0], r[5]), lambda r: r[0])
-            
+            merge_telemetry_csv("data/sadang_telemetry.csv", remote_sadang, lambda r: (r[0], r[5]), lambda r: r[0])
+
         remote_upstream = data.get("upstream_csv", "")
         if remote_upstream:
-            _merge_csv_file("data/upstream_telemetry.csv", remote_upstream, lambda r: (r[0], r[1], r[6]), lambda r: r[0])
-            
+            merge_telemetry_csv("data/upstream_telemetry.csv", remote_upstream, lambda r: (r[0], r[1], r[6]), lambda r: r[0])
+
         online_learner.rebuild_from_csvs()
         online_learner.save_state()
         CACHE_XAI_ANALYSIS.clear()
@@ -1541,9 +1512,44 @@ def sync_from_render():
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
+@app.post("/api/backup/import")
+async def import_backup_data(request: Request, token: str = Query("")):
+    """외부 백업 데이터(CSV 및 온라인 모델)를 현재 서버에 병합 복원 (Render 재배포 초기화 복구용)"""
+    global CACHE_XAI_ANALYSIS
+    ok, msg = _verify_admin_access(request, token=token, min_interval_sec=5.0)
+    if not ok:
+        return {"success": False, "error": msg}
+
+    try:
+        payload = await request.json()
+        remote_sadang = payload.get("sadang_csv", "")
+        if remote_sadang:
+            merge_telemetry_csv("data/sadang_telemetry.csv", remote_sadang, lambda r: (r[0], r[5]), lambda r: r[0])
+
+        remote_upstream = payload.get("upstream_csv", "")
+        if remote_upstream:
+            merge_telemetry_csv("data/upstream_telemetry.csv", remote_upstream, lambda r: (r[0], r[1], r[6]), lambda r: r[0])
+
+        online_learner.rebuild_from_csvs()
+        online_learner.save_state()
+        CACHE_XAI_ANALYSIS.clear()
+        return {
+            "success": True,
+            "message": "백업 데이터 병합 및 모델 재구축 완료",
+            "summary": online_learner.get_status_summary()
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @app.get("/api/backup/export")
-def export_backup_data():
+def export_backup_data(request: Request, token: str = Query("")):
     """서버에 축적된 텔레메트리 CSV 및 학습 모델 상태를 JSON으로 추출 (동기화 및 백업용)"""
+    ok, msg = _verify_admin_access(request, token=token, min_interval_sec=2.0)
+    if not ok:
+        return {"success": False, "error": msg}
+
     sadang_csv = ""
     if os.path.exists("data/sadang_telemetry.csv"):
         try:

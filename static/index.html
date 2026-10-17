@@ -637,6 +637,15 @@
       }
     }
 
+    // 불필요한 전체 DOM 파괴/재생성 방지 헬퍼 (내용이 동일하면 리플로우 생략)
+    function setInnerHTMLIfChanged(el, html) {
+      if (!el) return;
+      if (el._lastHTML !== html) {
+        el.innerHTML = html;
+        el._lastHTML = html;
+      }
+    }
+
     // ⭐ XAI (Explainable AI) 및 학우 실시간 대기열 데이터 로드 및 시각화 (15초 주기 갱신)
     async function fetchXaiData(isSilent = false) {
       const requestId = ++currentXaiRequestId;
@@ -650,6 +659,7 @@
       }
 
       if (!isSilent) {
+        container._lastHTML = null;
         container.innerHTML = `
           <div class="p-6 bg-white rounded-2xl border border-indigo-200 text-center space-y-3 shadow-xs">
             <div class="w-8 h-8 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin mx-auto"></div>
@@ -917,7 +927,7 @@
         `).join("");
 
         // 3. 전체 합체 렌더링
-        container.innerHTML = `
+        const xaiHTML = `
           <!-- 0. 정류장 특화 분석 카드 (사당역 줄 제보 or 기점발 상행 분석) -->
           ${stationCardHTML}
 
@@ -1026,6 +1036,7 @@
             </div>
           </div>
         `;
+        setInnerHTMLIfChanged(container, xaiHTML);
         stopRefreshSpin(refreshIcon, spinStart);
         const xaiUpdateTime = document.getElementById("xaiUpdateTime");
         if (xaiUpdateTime) {
@@ -1035,6 +1046,7 @@
 
       } catch (err) {
         stopRefreshSpin(refreshIcon, spinStart);
+        container._lastHTML = null;
         container.innerHTML = `<div class="p-4 text-center text-xs text-rose-500 font-bold">XAI 데이터 통신 오류: ${err.message}</div>`;
       }
     }
@@ -1100,9 +1112,10 @@
         let vehicles = data.vehicles || [];
         const stations = data.stations || [];
 
+        let arrivalHTML = "";
         if (arrivals.length === 0) {
           if (vehicles.length > 0) {
-            arrivalContainer.innerHTML = `
+            arrivalHTML = `
               <div class="p-3 bg-blue-50/70 rounded-xl border border-blue-200 space-y-1">
                 <div class="flex justify-between items-center text-xs font-bold text-blue-900">
                   <span>● 7790번 실시간 운행 중 (${vehicles.length}대 관측)</span>
@@ -1114,10 +1127,10 @@
               </div>
             `;
           } else {
-            arrivalContainer.innerHTML = `<div class="p-3 bg-white rounded-xl border border-gray-200 text-center text-xs text-gray-400">현재 운행 중인 7790번이 없습니다.</div>`;
+            arrivalHTML = `<div class="p-3 bg-white rounded-xl border border-gray-200 text-center text-xs text-gray-400">현재 운행 중인 7790번이 없습니다.</div>`;
           }
         } else {
-          arrivalContainer.innerHTML = arrivals.map(bus => {
+          arrivalHTML = arrivals.map(bus => {
             const isReserved = isCharterOrReservedBus(bus);
             const is79Plate = (bus.plateNo || "").includes("79");
             const badgeBg = isReserved ? "bg-rose-600 text-white" : "bg-emerald-600 text-white";
@@ -1165,6 +1178,7 @@
             `;
           }).join("");
         }
+        setInnerHTMLIfChanged(arrivalContainer, arrivalHTML);
 
         const renderVehicleBadges = (vList) => vList.map(v => {
           const isResv = isCharterOrReservedBus(v);
@@ -1224,7 +1238,7 @@
 
           // 4. 타임라인 행 렌더링: 정렬 어긋남 방지를 위해 -mx-2 제거, '회차' 뱃지는 이름 옆으로 배치하여 잘림 방지
           timelineHTML += `
-            <div id="${isTarget ? 'station-target' : ''}" class="relative flex items-center py-2.5 z-10 ${isTarget ? 'bg-blue-50/80 rounded-xl border border-blue-200' : ''}">
+            <div id="${isTarget ? 'station-target' : ''}" class="relative flex items-center py-3 z-10 ${isTarget ? 'bg-blue-50/80 rounded-xl border border-blue-200' : ''}">
               <!-- 좌측: 정류장 동그라미 또는 버스 아이콘 (세로선 중심 16px과 정확히 일치) -->
               <div class="w-8 flex-shrink-0 flex items-center justify-center z-10">
                 ${nodeDot}
@@ -1251,7 +1265,7 @@
             </div>
           `;
 
-          // 5. 정류소 사이 선로 구간 주행 버스 렌더링 (기존 아이콘 및 뱃지 디자인 그대로 정류소 사이 선로에 배치)
+          // 5. 정류소 사이 선로 구간 주행 버스 렌더링 (행 간격을 벌리지 않고 h-0 정중앙 경계선 위에 오버레이)
           if (transitVehicles.length > 0) {
             const firstTransit = transitVehicles[0];
             const isResv = isCharterOrReservedBus(firstTransit);
@@ -1259,16 +1273,16 @@
             const transitInfoHTML = renderVehicleBadges(transitVehicles);
 
             timelineHTML += `
-              <div class="relative flex items-center py-1 z-10 -my-1">
-                <!-- 좌측: 정류소 사이 선로(세로선 중심 16px) 위의 버스 아이콘 -->
-                <div class="w-8 flex-shrink-0 flex items-center justify-center z-10">
-                  <div class="w-7 h-7 rounded-full ${busBg} text-white shadow-md ring-4 flex items-center justify-center text-xs z-20 bus-pulse">
+              <div class="relative h-0 overflow-visible flex items-center z-20 pointer-events-none">
+                <!-- 좌측: 정류소와 다음 정류소 사이 정중앙 선로(세로선 중심 16px) 위의 버스 아이콘 -->
+                <div class="w-8 flex-shrink-0 flex items-center justify-center z-20 pointer-events-auto">
+                  <div class="w-6 h-6 rounded-full ${busBg} text-white shadow-md ring-2 flex items-center justify-center text-[11px] z-20 bus-pulse">
                     🚌
                   </div>
                 </div>
 
-                <!-- 우측: 버스 번호 및 좌석 뱃지 -->
-                <div class="flex-1 ml-2 flex justify-end items-center min-w-0 pr-2">
+                <!-- 우측: 정류소 사이 정중앙 높이에 배치되는 버스 번호 및 좌석 뱃지 -->
+                <div class="flex-1 ml-2 flex justify-end items-center min-w-0 pr-2 pointer-events-auto">
                   <div class="flex-shrink-0 flex flex-col items-end space-y-1">
                     ${transitInfoHTML}
                   </div>
@@ -1278,7 +1292,7 @@
           }
         });
 
-        timelineContainer.innerHTML = timelineHTML;
+        setInnerHTMLIfChanged(timelineContainer, timelineHTML);
 
         // ⭐ 새 정류소 렌더링 완료 후 해당 정류장 위치로 자동 스크롤 (초기 로딩 레이아웃 지연 완벽 보정)
         if (autoScroll) {
@@ -1294,6 +1308,7 @@
         console.error("데이터 로드 오류:", err);
         stopRefreshSpin(refreshIcon, spinStart);
         if (arrivalContainer) {
+          arrivalContainer._lastHTML = null;
           arrivalContainer.innerHTML = `
             <div class="p-3.5 bg-amber-50 rounded-xl border border-amber-200 text-center space-y-1.5">
               <div class="text-xs font-bold text-amber-900 flex items-center justify-center space-x-1">

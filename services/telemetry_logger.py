@@ -262,4 +262,56 @@ def process_live_vehicles_for_learning(
             _save_dedup_cache()
 
 
+def merge_telemetry_csv(file_path: str, remote_text: str, key_fn: Callable, sort_fn: Callable) -> int:
+    """원격/백업 CSV 텍스트와 로컬 CSV 파일을 중복 없이 병합 후 원자적(Atomic)으로 저장"""
+    import io
+    rows = []
+    seen = set()
+    header = None
+    with TELEMETRY_LOCK:
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, "r", encoding="utf-8-sig") as f:
+                    reader = csv.reader(f)
+                    header = next(reader, None)
+                    for r in reader:
+                        if not r:
+                            continue
+                        try:
+                            k = key_fn(r)
+                            if k not in seen:
+                                seen.add(k)
+                                rows.append(r)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        remote_reader = csv.reader(io.StringIO(remote_text))
+        remote_header = next(remote_reader, None)
+        if not header:
+            header = remote_header
+        for r in remote_reader:
+            if not r:
+                continue
+            try:
+                k = key_fn(r)
+                if k not in seen:
+                    seen.add(k)
+                    rows.append(r)
+            except Exception:
+                pass
+
+        rows.sort(key=sort_fn)
+        os.makedirs(os.path.dirname(file_path) or ".", exist_ok=True)
+        tmp_path = file_path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            if header:
+                writer.writerow(header)
+            writer.writerows(rows)
+        os.replace(tmp_path, file_path)
+    return len(rows)
+
+
 SADANG_POST_DEPARTURE_IDS_SET = set(SADANG_POST_DEPARTURE_STATION_IDS.keys())

@@ -1,11 +1,15 @@
 """
-[Render 클라우드 서버 -> 로컬 PC 텔레메트리 데이터 동기화 도구]
-- Render 서버에서 실시간 24시간 수집된 CSV와 온라인 모델 상태를 로컬 PC로 원클릭 다운로드하여 동기화합니다.
+[Render 클라우드 서버 <-> 로컬 PC 텔레메트리 데이터 양방향 병합 동기화 도구]
+- Render 서버에서 실시간 24시간 수집된 CSV와 로컬 PC의 CSV를 중복 없이 합집합(Union) 병합하고,
+  온라인 학습 모델(Ridge + SGD)을 재구축한 뒤 실행 중인 로컬 서버 메모리에도 즉시 반영합니다.
 """
 import os
 import sys
 import json
 import requests
+from core.config import ADMIN_API_TOKEN, REMOTE_SYNC_URL
+from services.telemetry_logger import merge_telemetry_csv
+from services.online_learner import online_learner
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -13,7 +17,7 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-RENDER_URL = "https://bus-project-e9nd.onrender.com"
+RENDER_URL = REMOTE_SYNC_URL.rstrip("/")
 DATA_DIR = "data"
 MODELS_DIR = "models"
 
@@ -25,33 +29,50 @@ def sync():
     url = f"{RENDER_URL}/api/backup/export"
     print(f"[동기화] Render 서버({url})에서 데이터를 조회합니다...")
 
+    headers = {"User-Agent": "Mozilla/5.0"}
+    if ADMIN_API_TOKEN:
+        headers["X-Admin-Token"] = ADMIN_API_TOKEN
+
     try:
-        resp = requests.get(url, timeout=15)
+        resp = requests.get(url, headers=headers, timeout=15)
         if resp.status_code == 200:
             data = resp.json()
             if not data.get("success"):
-                print("[실패] 서버 응답 오류")
+                print(f"[실패] 서버 응답 오류: {data.get('error', '')}")
                 return
 
             sadang_csv = data.get("sadang_csv", "")
             upstream_csv = data.get("upstream_csv", "")
-            model_json = data.get("model_json", {})
-            summary = data.get("summary", {})
 
             if sadang_csv:
-                with open(os.path.join(DATA_DIR, "sadang_telemetry.csv"), "w", encoding="utf-8-sig") as f:
-                    f.write(sadang_csv)
-                print(f"[완료] 사당역 텔레메트리 CSV 동기화 완료")
+                cnt_s = merge_telemetry_csv(
+                    os.path.join(DATA_DIR, "sadang_telemetry.csv"),
+                    sadang_csv,
+                    lambda r: (r[0], r[5]),
+                    lambda r: r[0]
+                )
+                print(f"[완료] 사당역 텔레메트리 CSV 병합 완료 (총 {cnt_s}건)")
 
             if upstream_csv:
-                with open(os.path.join(DATA_DIR, "upstream_telemetry.csv"), "w", encoding="utf-8-sig") as f:
-                    f.write(upstream_csv)
-                print(f"[완료] 수원대 상행 텔레메트리 CSV 동기화 완료")
+                cnt_u = merge_telemetry_csv(
+                    os.path.join(DATA_DIR, "upstream_telemetry.csv"),
+                    upstream_csv,
+                    lambda r: (r[0], r[1], r[6]),
+                    lambda r: r[0]
+                )
+                print(f"[완료] 수원대 상행 텔레메트리 CSV 병합 완료 (총 {cnt_u}건)")
 
-            if model_json:
-                with open(os.path.join(MODELS_DIR, "sadang_online_model.json"), "w", encoding="utf-8") as f:
-                    json.dump(model_json, f, ensure_ascii=False, indent=2)
-                print(f"[완료] 온라인 모델 JSON 동기화 완료")
+            online_learner.rebuild_from_csvs()
+            online_learner.save_state()
+            summary = online_learner.get_status_summary()
+            print("[완료] 온라인 모델(Ridge + SGD) 재구축 및 JSON 저장 완료")
+
+            # 실행 중인 로컬 서버가 있으면 메모리 상태 즉시 갱신
+            try:
+                requests.post("http://127.0.0.1:8000/api/ml-reload", headers=headers, timeout=3)
+                print("[완료] 실행 중인 로컬 서버(127.0.0.1:8000) 메모리 동기화 완료")
+            except Exception:
+                pass
 
             print("\n[동기화 완료 요약]")
             print(f"- 사당역 누적 학습: {summary.get('totalSadangLearned', 0)}대")
